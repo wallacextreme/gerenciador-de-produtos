@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Permissões padrão essenciais para a janela principal do GestãoPro","local":true,"windows":["main"],"permissions":["core:default"]}}

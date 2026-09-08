@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="h-full bg-gray-50">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- SEO -->
+    <title>GestãoPro — Gestão Comercial e Estoque</title>
+    <meta name="description" content="Sistema completo de gestão comercial offline: controle de estoque, PDV, compras, cotações, relatórios e dashboard analítico. 100% offline com IndexedDB." />
+    <meta name="author" content="GestãoPro" />
+    <meta name="robots" content="noindex, nofollow" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="GestãoPro" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png" />
+
+    <!-- Open Graph (compartilhamento) -->
+    <meta property="og:title" content="GestãoPro — Gestão Comercial e Estoque" />
+    <meta property="og:description" content="Sistema completo offline: estoque, vendas, relatórios e muito mais." />
+    <meta property="og:type" content="website" />
+
+    <!-- Entry CSS -->
+    <link rel="stylesheet" href="/src/css/styles.css" />
+
+    <style>
+      /* Banner de status offline — visível apenas quando não há conexão */
+      #offline-banner {
+        display: none;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 9999;
+        background: #1e293b;
+        color: #94a3b8;
+        font-size: 11px;
+        font-weight: 600;
+        text-align: center;
+        padding: 6px 16px;
+        border-top: 1px solid #334155;
+        letter-spacing: 0.025em;
+      }
+      #offline-banner.show { display: block; }
+
+      /* Banner de atualização disponível */
+      #update-banner {
+        display: none;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        z-index: 9998;
+        background: #1e40af;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        text-align: center;
+        padding: 8px 16px;
+        cursor: pointer;
+      }
+      #update-banner.show { display: flex; align-items: center; justify-content: center; gap: 8px; }
+    </style>
+  </head>
+  <body class="h-full text-gray-900 font-sans antialiased">
+    <!-- Application Mount Point -->
+    <div id="app" class="h-full flex flex-col md:flex-row overflow-hidden">
+      <!-- Skeleton UI structure before app mounts -->
+      <div class="flex-1 flex items-center justify-center">
+        <p class="text-gray-500 animate-pulse">Carregando sistema...</p>
+      </div>
+    </div>
+
+    <!-- Offline Status Banner -->
+    <div id="offline-banner" role="status" aria-live="polite">
+      📵 Você está offline. Os dados locais continuam disponíveis.
+    </div>
+
+    <!-- SW Update Banner -->
+    <div id="update-banner" role="alert">
+      <span>🔄 Nova versão do GestãoPro disponível!</span>
+      <button id="btn-apply-update" style="background:#3b82f6;border:none;color:#fff;font-weight:700;font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;margin-left:8px;">
+        Atualizar Agora
+      </button>
+    </div>
+
+    <!-- Entry JS -->
+    <script type="module" src="/src/js/main.js"></script>
+
+    <!-- PWA lifecycle & online/offline detection -->
+    <script>
+      // Offline/Online banner
+      function updateNetworkBanner() {
+        const banner = document.getElementById('offline-banner');
+        if (!banner) return;
+        if (!navigator.onLine) {
+          banner.classList.add('show');
+        } else {
+          banner.classList.remove('show');
+        }
+      }
+      window.addEventListener('online', updateNetworkBanner);
+      window.addEventListener('offline', updateNetworkBanner);
+      updateNetworkBanner();
+
+      // SW Update banner
+      window.addEventListener('pwa:update-ready', (event) => {
+        const banner = document.getElementById('update-banner');
+        const btn = document.getElementById('btn-apply-update');
+        if (banner) banner.classList.add('show');
+        if (btn && event.detail && event.detail.applyUpdate) {
+          btn.addEventListener('click', () => {
+            event.detail.applyUpdate();
+            banner.classList.remove('show');
+          }, { once: true });
+        }
+      });
+    </script>
+  </body>
+</html>
+
