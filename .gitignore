@@ -1,45 +1,56 @@
 # dependencies (bun install)
-node_modules
+node_modules/
 
-# output
-out
-dist
+# output & distribution builds
+out/
+dist/
 *.tgz
 
 # code coverage
-coverage
+coverage/
 *.lcov
 
-# logs
-logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+# logs & debugging
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# dotenv environment variable files
+# dotenv environment variable files (never commit real secrets)
 .env
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
+.env.*
+!.env.example
 
-# caches
+# local databases, dumps and backups (never commit real business data)
+*.bak
+*.backup
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+backups/
+dump/
+*.json.bak
+
+# caches & temporary files
 .eslintcache
-.cache
+.cache/
 *.tsbuildinfo
-
-# IntelliJ based IDEs
-.idea
-
-# Finder (MacOS) folder config
-.DS_Store
+.temp/
+.tmp/
 
 # Tauri build artifacts
 src-tauri/target/
 target/
 
-# Windows OS
+# IDE & Editor configs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
 Thumbs.db
 desktop.ini
-
-# VSCode
-.vscode/
