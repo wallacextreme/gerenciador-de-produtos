@@ -2,6 +2,7 @@ import { syncRepository } from '../repositories/SyncRepository.js';
 import { settingsRepository } from '../repositories/SettingsRepository.js';
 import { eventBus, EVENTS } from '../eventBus.js';
 import { FirebaseProvider } from '../sync/FirebaseProvider.js';
+import { MockCloudProvider } from '../sync/MockCloudProvider.js';
 
 /**
  * GestãoPro — SyncEngine (FASE 13)
@@ -10,7 +11,11 @@ import { FirebaseProvider } from '../sync/FirebaseProvider.js';
  */
 export class SyncEngine {
   constructor(cloudProvider = null) {
-    this.provider = cloudProvider || new FirebaseProvider();
+    const isPublicDemo = typeof import.meta !== 'undefined' && 
+                         import.meta.env && 
+                         (import.meta.env.VITE_PUBLIC_DEMO === 'true' || import.meta.env.VITE_PUBLIC_DEMO === true);
+
+    this.provider = cloudProvider || (isPublicDemo ? new MockCloudProvider({ name: 'Demonstração em Nuvem (Simulada)' }) : new FirebaseProvider());
     this.isSyncing = false;
     this.autoSync = true;
     this.lastSyncTimestamp = null;

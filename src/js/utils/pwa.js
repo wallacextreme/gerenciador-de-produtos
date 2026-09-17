@@ -37,9 +37,11 @@ export class PWAHandler {
    */
   async _registerServiceWorker() {
     try {
-      // Registra o Service Worker na raiz
-      this.swRegistration = await navigator.serviceWorker.register('/sw.js', {
-        scope: '/'
+      // Registra o Service Worker respeitando a base da aplicação (suporte a GitHub Pages)
+      const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL) || '/';
+      const swPath = `${base.endsWith('/') ? base : base + '/'}sw.js`;
+      this.swRegistration = await navigator.serviceWorker.register(swPath, {
+        scope: base
       });
 
       // Se já houver um worker em espera (waiting), notifica prontidão de update

@@ -50,8 +50,10 @@ export class PWAService {
    */
   static async _registerServiceWorker() {
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js', {
-        scope: '/'
+      const base = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL) || '/';
+      const swPath = `${base.endsWith('/') ? base : base + '/'}sw.js`;
+      const registration = await navigator.serviceWorker.register(swPath, {
+        scope: base
       });
 
       this._swRegistration = registration;

@@ -3,6 +3,7 @@ import { requestPersistentStorage } from './utils/storage.js';
 import { getDB } from './db/connection.js';
 import { pwaHandler } from './utils/pwa.js';
 import { syncEngine } from './services/SyncEngine.js';
+import { initPublicDemoIfNeeded } from './demo/demoSeed.js';
 
 // Application Entry Point
 document.addEventListener('DOMContentLoaded', async () => {
@@ -12,6 +13,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // 2. Initialize Database and Migrations
     await getDB();
+    
+    // 2.1 Initialize Synthetic Demo Dataset if in Demo Mode or empty DB
+    await initPublicDemoIfNeeded();
     
     // 3. Initialize PWA & Service Worker
     await pwaHandler.init();

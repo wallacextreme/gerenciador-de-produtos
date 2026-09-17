@@ -7,9 +7,13 @@
  *   - O Service Worker NUNCA apaga ou interfere no IndexedDB.
  */
 
-const CACHE_VERSION = 'gestaopro-v1.12.0';
+const CACHE_VERSION = 'gestaopro-v1.13.0';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
+
+// Escopo e base path dinâmicos do Service Worker (compatível com GitHub Pages e raiz)
+const scopeUrl = self.registration ? new URL(self.registration.scope) : new URL(self.location.origin);
+const basePath = scopeUrl.pathname.endsWith('/') ? scopeUrl.pathname : `${scopeUrl.pathname}/`;
 
 // Recursos críticos do shell da aplicação para cache imediato na instalação
 const SHELL_ASSETS = [
@@ -29,10 +33,15 @@ const SHELL_ASSETS = [
 self.addEventListener('install', (event) => {
   console.log('[SW] Instalando Service Worker:', CACHE_VERSION);
 
+  const scopePath = self.registration ? new URL(self.registration.scope).pathname.replace(/\/$/, '') : '';
+  const assetsToCache = scopePath 
+    ? SHELL_ASSETS.map(asset => asset === '/' ? (scopePath + '/') : (scopePath + asset))
+    : SHELL_ASSETS;
+
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => {
       console.log('[SW] Pré-cacheando shell da aplicação...');
-      return cache.addAll(SHELL_ASSETS).catch((err) => {
+      return cache.addAll(assetsToCache).catch((err) => {
         console.warn('[SW] Aviso no pré-cache de assets:', err);
       });
     })
@@ -74,19 +83,19 @@ self.addEventListener('fetch', (event) => {
   if (!url.protocol.startsWith('http')) return;
 
   // 1. Navegação HTML (SPA / Hash Routes) → Network First com fallback transparente para o cache
-  if (request.mode === 'navigate' || url.pathname === '/' || url.pathname === '/index.html') {
+  if (request.mode === 'navigate' || url.pathname === '/' || url.pathname === '/index.html' || (basePath && (url.pathname === basePath || url.pathname === `${basePath}index.html`))) {
     event.respondWith(networkFirst(request, STATIC_CACHE));
     return;
   }
 
   // 2. Assets compilados pelo Vite (/assets/* com hash imutável) → Cache First
-  if (url.pathname.startsWith('/assets/')) {
+  if (url.pathname.startsWith('/assets/') || url.pathname.includes('/assets/')) {
     event.respondWith(cacheFirst(request, RUNTIME_CACHE));
     return;
   }
 
   // 3. Ícones e Manifest → Cache First (com revalidação)
-  if (url.pathname.startsWith('/icons/') || url.pathname === '/manifest.json') {
+  if (url.pathname.includes('/icons/') || url.pathname.endsWith('/manifest.json')) {
     event.respondWith(cacheFirst(request, STATIC_CACHE));
     return;
   }
@@ -133,7 +142,7 @@ async function networkFirst(request, cacheName) {
 
     // Se estiver navegando e não encontrar a rota exata, serve o index.html em cache
     if (request.mode === 'navigate') {
-      const fallbackIndex = await cache.match('/index.html') || await cache.match('/');
+      const fallbackIndex = await cache.match(`${basePath}index.html`) || await cache.match(basePath);
       if (fallbackIndex) return fallbackIndex;
     }
 
