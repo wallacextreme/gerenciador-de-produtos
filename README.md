@@ -309,6 +309,12 @@ Os instaladores `.exe` (NSIS) e `.msi` serão gerados em `src-tauri/target/relea
 
 ---
 
+## 📄 Licença
+
+Este projeto é disponibilizado para fins de estudo, demonstração técnica e avaliação de portfólio profissional. Todos os direitos reservados ao autor.
+
+---
+
 ## 👨‍💻 Autor
 
 Desenvolvido por **[Wallace Soares](https://github.com/wallacextreme)**.
