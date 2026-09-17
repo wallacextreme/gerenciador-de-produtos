@@ -309,6 +309,19 @@ Os instaladores `.exe` (NSIS) e `.msi` serão gerados em `src-tauri/target/relea
 
 ---
 
+## 📚 Documentação & Engenharia
+
+| Documento | Descrição |
+| :--- | :--- |
+| 📖 **[Estudo de Caso de Engenharia (Case Study)](docs/PORTFOLIO_CASE_STUDY.md)** | Decisões técnicas, desafios de arquitetura, benchmarks e métricas. |
+| 💼 **[Guia para LinkedIn e Currículo](docs/CURRICULO_E_LINKEDIN.md)** | Textos prontos para destaque no perfil, posts e tópicos de CV (STAR). |
+| 📘 **[Manual do Usuário](MANUAL_DO_USUARIO.md)** | Manual operacional de uso de todos os módulos do ERP. |
+| 📊 **[Relatório de Qualidade ISO/IEC 25010](RELATORIO_QUALIDADE_ISO25010.md)** | Avaliação técnica segundo as 9 características do modelo de produto. |
+| 📋 **[Sistema de Gestão da Qualidade ISO 9001](SISTEMA_GESTAO_QUALIDADE_ISO9001.md)** | Governança de processos e rastreabilidade técnica. |
+| 🛡️ **[Política de Segurança (SECURITY.md)](SECURITY.md)** | Modelo de ameaças e canal de reporte responsável. |
+
+---
+
 ## 📄 Licença
 
 Este projeto é disponibilizado para fins de estudo, demonstração técnica e avaliação de portfólio profissional. Todos os direitos reservados ao autor.
