@@ -125,5 +125,72 @@ export function validateFirebaseConfig(config, options = { allowProduction: fals
     }
   }
 
+  // 6. Fail-closed no modo emulator: exige demo- e hosts locais de emulador
+  const isEmulatorMode = options.isEmulatorMode || 
+    (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.MODE === 'emulator');
+  if (isEmulatorMode) {
+    validateEmulatorRuntimeConfig(config, options);
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validação rigorosa e FAIL-CLOSED para modo de emulação (PHASE 13.9).
+ * Garante que:
+ * 1. O projectId obrigatoriamente comece com "demo-" para ativar a salvaguarda offline do Firebase SDK.
+ * 2. Os hosts de Authentication e Realtime Database estejam configurados com hosts locais.
+ * 3. Se Storage estiver presente, storageEmulatorHost deve estar configurado com host local.
+ * 4. NUNCA ocorra fallback silencioso para a nuvem real.
+ * @param {Object} config 
+ * @param {Object} [options]
+ * @param {boolean} [options.requireStorage=false]
+ */
+export function validateEmulatorRuntimeConfig(config, options = {}) {
+  if (!config) {
+    throw new Error('[FAIL-CLOSED] Configuração do Firebase não informada no modo emulator.');
+  }
+
+  const projectId = (config.projectId || '').toLowerCase().trim();
+  if (!projectId) {
+    throw new Error('[FAIL-CLOSED] "projectId" ausente no modo emulator.');
+  }
+
+  if (!projectId.startsWith('demo-')) {
+    throw new Error(
+      `[FAIL-CLOSED] No modo emulator, o "projectId" DEVE obrigatoriamente iniciar com o prefixo "demo-" ` +
+      `(ex: demo-gerenciador-produtos-staging) para garantir o isolamento offline do Firebase SDK. Recebido: "${projectId}".`
+    );
+  }
+
+  // 1. Auth Emulator obrigatório
+  const authHost = config.authEmulatorHost;
+  if (!authHost || typeof authHost !== 'string' || !authHost.trim()) {
+    throw new Error(
+      '[FAIL-CLOSED] Host do Auth Emulator (VITE_FIREBASE_AUTH_EMULATOR_HOST) é OBRIGATÓRIO no modo emulator. ' +
+      'Fallback para a nuvem do Firebase Authentication é terminantemente proibido.'
+    );
+  }
+
+  // 2. Realtime Database Emulator obrigatório
+  const dbHost = config.emulatorHost || config.databaseEmulatorHost;
+  if (!dbHost || typeof dbHost !== 'string' || !dbHost.trim()) {
+    throw new Error(
+      '[FAIL-CLOSED] Host do Realtime Database Emulator (VITE_FIREBASE_EMULATOR_HOST) é OBRIGATÓRIO no modo emulator. ' +
+      'Fallback para a nuvem do Firebase Realtime Database é terminantemente proibido.'
+    );
+  }
+
+  // 3. Storage Emulator (se storageBucket estiver presente ou se requireStorage for true)
+  if (options.requireStorage || config.storageBucket) {
+    const storageHost = config.storageEmulatorHost;
+    if (!storageHost || typeof storageHost !== 'string' || !storageHost.trim()) {
+      throw new Error(
+        '[FAIL-CLOSED] Host do Storage Emulator (VITE_FIREBASE_STORAGE_EMULATOR_HOST) é OBRIGATÓRIO no modo emulator ' +
+        'quando Cloud Storage está habilitado. Fallback para a nuvem é terminantemente proibido.'
+      );
+    }
+  }
+
   return { valid: true };
 }

@@ -7,6 +7,7 @@ import { getDB } from '../src/js/db/connection.js';
 import { eventBus, EVENTS } from '../src/js/eventBus.js';
 import {
   validateFirebaseConfig,
+  validateEmulatorRuntimeConfig,
   isProductionProject,
   FORBIDDEN_PRODUCTION_PROJECTS
 } from '../src/js/utils/firebaseConfigValidator.js';
@@ -781,6 +782,76 @@ describe('PHASE 09 — Firebase Staging + End-to-End Homologation', () => {
 
       const entry = await imageManifestRepository.findByPhotoId('f3');
       expect(entry.deletedAt).toBe(deletedTimestamp);
+    });
+  });
+
+  // ============================================================================
+  // 6. PHASE 13.9 — EMULATOR RUNTIME FAIL-CLOSED SAFETY GATE
+  // ============================================================================
+  describe('6. Fail-Closed Runtime Safety Gate no Modo Emulator (PHASE 13.9)', () => {
+    const validEmulatorConfig = {
+      projectId: 'demo-gerenciador-produtos-staging',
+      apiKey: 'AIzaSyDemoFakeKey',
+      authDomain: 'demo-gerenciador-produtos-staging.firebaseapp.com',
+      databaseURL: 'http://127.0.0.1:9000/?ns=demo-gerenciador-produtos-staging',
+      storageBucket: 'demo-gerenciador-produtos-staging.appspot.com',
+      emulatorHost: '127.0.0.1:9000',
+      authEmulatorHost: '127.0.0.1:9099',
+      storageEmulatorHost: '127.0.0.1:9199'
+    };
+
+    it('STG-31: deve aprovar configuração completa com prefixo demo- e hosts locais de emulador', () => {
+      const res = validateEmulatorRuntimeConfig(validEmulatorConfig);
+      expect(res.valid).toBe(true);
+    });
+
+    it('STG-32: deve rejeitar em modo emulator se projectId não iniciar com demo- (previne conexão à nuvem)', () => {
+      expect(() => {
+        validateEmulatorRuntimeConfig({
+          ...validEmulatorConfig,
+          projectId: 'gerenciador-produtos-staging'
+        });
+      }).toThrow(/\[FAIL-CLOSED\] No modo emulator, o "projectId" DEVE obrigatoriamente iniciar com o prefixo "demo-"/);
+    });
+
+    it('STG-33: deve rejeitar em modo emulator se o host do Auth Emulator estiver ausente', () => {
+      const { authEmulatorHost, ...withoutAuthHost } = validEmulatorConfig;
+      expect(() => {
+        validateEmulatorRuntimeConfig({
+          ...withoutAuthHost,
+          emulatorHost: undefined,
+          authEmulatorHost: undefined
+        });
+      }).toThrow(/\[FAIL-CLOSED\] Host do Auth Emulator.*é OBRIGATÓRIO/);
+    });
+
+    it('STG-34: deve rejeitar em modo emulator se o host do Realtime Database Emulator estiver ausente', () => {
+      expect(() => {
+        validateEmulatorRuntimeConfig({
+          ...validEmulatorConfig,
+          emulatorHost: undefined,
+          databaseEmulatorHost: undefined
+        });
+      }).toThrow(/\[FAIL-CLOSED\] Host do Realtime Database Emulator.*é OBRIGATÓRIO/);
+    });
+
+    it('STG-35: deve rejeitar em modo emulator se Cloud Storage estiver ativo mas host do Storage Emulator ausente', () => {
+      expect(() => {
+        validateEmulatorRuntimeConfig({
+          ...validEmulatorConfig,
+          storageEmulatorHost: undefined,
+          emulatorHost: '127.0.0.1:9000'
+        }, { requireStorage: true });
+      }).toThrow(/\[FAIL-CLOSED\] Host do Storage Emulator.*é OBRIGATÓRIO/);
+    });
+
+    it('STG-36: validateFirebaseConfig deve invocar validateEmulatorRuntimeConfig quando isEmulatorMode for true', () => {
+      expect(() => {
+        validateFirebaseConfig({
+          projectId: 'cloud-staging-project',
+          apiKey: 'key'
+        }, { isEmulatorMode: true });
+      }).toThrow(/\[FAIL-CLOSED\]/);
     });
   });
 });

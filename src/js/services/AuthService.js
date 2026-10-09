@@ -50,7 +50,8 @@ export class AuthService {
             appId: env.VITE_FIREBASE_APP_ID,
             databaseURL: env.VITE_FIREBASE_DATABASE_URL,
             emulatorHost: env.VITE_FIREBASE_EMULATOR_HOST,
-            authEmulatorHost: env.VITE_FIREBASE_AUTH_EMULATOR_HOST
+            authEmulatorHost: env.VITE_FIREBASE_AUTH_EMULATOR_HOST,
+            storageEmulatorHost: env.VITE_FIREBASE_STORAGE_EMULATOR_HOST
           };
         }
       }

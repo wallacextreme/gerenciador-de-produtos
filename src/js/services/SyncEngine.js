@@ -45,7 +45,9 @@ export class SyncEngine {
             messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
             appId: env.VITE_FIREBASE_APP_ID,
             databaseURL: env.VITE_FIREBASE_DATABASE_URL,
-            emulatorHost: env.VITE_FIREBASE_EMULATOR_HOST
+            emulatorHost: env.VITE_FIREBASE_EMULATOR_HOST,
+            authEmulatorHost: env.VITE_FIREBASE_AUTH_EMULATOR_HOST,
+            storageEmulatorHost: env.VITE_FIREBASE_STORAGE_EMULATOR_HOST
           };
         }
       }

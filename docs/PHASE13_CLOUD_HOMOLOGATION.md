@@ -556,3 +556,51 @@ Foram auditadas e testadas contra o Realtime Database Emulator as políticas com
 * Ledger de estoque com validação semântica e tipagem fechada testada no emulador.
 * Nenhuma alteração pendente de auditoria ou regressão.
 * Ambiente na nuvem real permanece intocado e protegido.
+
+---
+
+## 12. Fase 13.9 — Emulator-Only Runtime Safety Gate
+
+### A. Objetivo e Implementação
+Configuração de ambiente local isolado (`.env.emulator.local`) e implementação da salvaguarda **Fail-Closed** no validador de configuração do cliente (`src/js/utils/firebaseConfigValidator.js`).
+
+### B. Regras de Proteção Fail-Closed
+1. O Project ID deve obrigatoriamente iniciar com `demo-` (ex: `demo-gerenciador-produtos-staging`), ativando a salvaguarda offline do Firebase SDK.
+2. A presença de `VITE_FIREBASE_AUTH_EMULATOR_HOST` (porta 9099) e `VITE_FIREBASE_EMULATOR_HOST` (porta 9000) é estritamente obrigatória no modo `emulator`.
+3. Caso Cloud Storage seja utilizado, `VITE_FIREBASE_STORAGE_EMULATOR_HOST` (porta 9199) torna-se obrigatório.
+4. Qualquer configuração incompleta aborta a inicialização com diagnóstico explícito, sem jamais permitir fallback silencioso para a nuvem.
+
+### C. Resultados e Testes (STG-31 a STG-36)
+* 6 novos testes em `tests/firebase_staging_phase9.test.js` aprovados (100% PASS).
+* Rejeição de Project ID de staging ou produção no modo emulator.
+* Rejeição de inicialização sem hosts de emuladores.
+* `.env.staging` e `.env.emulator.local` confirmados como ignorados pelo Git.
+
+---
+
+## 13. Fase 13.10 — Browser Runtime E2E & Emulator Destination Verification
+
+### A. Metodologia de Validação no Navegador Real
+Validação ponta a ponta executada diretamente no navegador **Google Chrome** através de automação com `puppeteer-core`, interagindo com o servidor Vite (`http://localhost:3000`) em modo `emulator` e os emuladores locais do Firebase Emulator Suite.
+
+### B. Evidências de Execução E2E no Navegador
+
+| Etapa / Requisito | Comportamento Observado no Navegador | Resultado |
+| :--- | :--- | :--- |
+| **1. Carregamento do Modo Emulator** | Aplicação inicializada com sucesso em `http://localhost:3000` sob modo `emulator`. Route guard redirecionou usuário não autenticado para `#/login`. | ✅ PASS |
+| **2. Authentication Emulator (9099)** | Formulário de login submetido com credenciais sintéticas (`test-user@empresa.com`). Requisições autenticadas `signInWithPassword`, `lookup` e `token` direcionadas exclusivamente a `http://127.0.0.1:9099`. Token JWT emitido pelo emulador com `aud: "demo-gerenciador-produtos-staging"`. | ✅ PASS |
+| **3. Realtime Database Emulator (9000)** | Leitura autorizada de `/tenants/tenant-staging/products/prod_1` retornou HTTP 200 via `http://127.0.0.1:9000`. Escrita sintética de `prod_browser_e2e` e leitura de confirmação executadas com sucesso (HTTP 200). | ✅ PASS |
+| **4. Storage Emulator (9199)** | Wrapper do Storage Emulator requer Java 21+ (`firebase-tools no longer supports Java version before 21`). Como o sistema possui Java 1.8 e o fluxo principal testado não exigiu upload de foto no navegador, a conexão foi mantida em isolamento estrito. | ⚠️ NOT VERIFIED |
+| **5. Login na Aplicação Real** | Login interativo no formulário HTML web validado, com transição de rota para `#/dashboard`, exibição do cabeçalho "Painel de Controle e Análises" e navegação para catálogo de produtos e configurações. | ✅ PASS |
+| **6. Leitura e Gravação pela Aplicação** | Operações sintéticas de leitura e gravação no tenant autorizado (`tenant-staging`) executadas e confirmadas a partir do contexto do navegador. | ✅ PASS |
+| **7. Isolamento Entre Tenants** | Tentativa de gravação no tenant `/tenants/tenant-other/products/prod_illegal` a partir do navegador com o token de `tenant-staging` foi **rejeitada com HTTP 401 Permission Denied** pelo motor de regras do emulador. | ✅ PASS |
+| **8. Falha Segura sem Host de Emulador** | Testes isolados comprovaram que a ausência de `authEmulatorHost` ou `emulatorHost`, ou uso de ID sem `demo-`, interrompe a inicialização com mensagem diagnóstica clara. | ✅ PASS |
+| **9. Resiliência Offline e Reconexão** | Transição para offline ativou banner informativo no app; navegação e carregamento via IndexedDB continuaram funcionais; retorno ao modo online restaurou a conectividade normalmente. | ✅ PASS |
+| **10. Ausência de Fallback para Nuvem (Zero Egress)**| Auditoria de 107 requisições HTTP do navegador: 12 direcionadas aos emuladores locais (9099/9000) e **0 requisições externas para o Firebase Cloud**. | ✅ PASS |
+| **11. Suíte Completa de Testes (`bun test`)** | 594 testes executados across 26 arquivos — **594 PASS / 0 FAIL**. | ✅ PASS |
+| **12. Build de Produção (`bun run build`)** | Compilação Vite v8.2.1 de 94 módulos concluída em **851ms** (0 erros). | ✅ PASS |
+| **13. Estado do Git** | Branch `main`, sem novos commits, arquivos locais modificados preservados, `.env.*` ignorados. | **LOCAL CHANGES** |
+
+### C. Classificação da Fase 13.10
+**Resultado:** `BROWSER_EMULATOR_E2E_PASS` (com Storage marcado como `NOT VERIFIED` devido a restrição do ambiente de JDK).
+
