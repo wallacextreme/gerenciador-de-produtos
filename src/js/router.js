@@ -1,9 +1,12 @@
+import { authService } from './services/AuthService.js';
+
 export class Router {
   constructor() {
     this.routes = {};
     this.rootElement = null;
     this.currentCleanup = null;
     this.currentPage = null;
+    this.redirectAfterLogin = null;
     
     // Listen for hash changes
     window.addEventListener('hashchange', () => this.handleRoute());
@@ -23,8 +26,10 @@ export class Router {
     this.addRoute('compras', () => this.renderPurchases());
     this.addRoute('fornecedores', () => this.renderSuppliers());
     this.addRoute('cotacoes', () => this.renderQuotations());
+    this.addRoute('compras/importar-nfe', () => this.renderNFeImport());
     this.addRoute('configuracoes', () => this.renderSettings());
     this.addRoute('relatorios', () => this.renderReports());
+    this.addRoute('login', () => this.renderLogin());
 
     // Handle initial route
     if (!window.location.hash) {
@@ -49,6 +54,21 @@ export class Router {
     const routeBase = parts[0]; 
     const routeAction = parts[1];
     const routeId = parts[2];
+
+    // Route Guard centralizado:
+    // Se a rota requer autenticação e o usuário não está autenticado, redireciona para login.
+    // Offline-First: se já estiver autenticado (sessão persistida), o acesso é 100% liberado offline.
+    if (!authService.canAccessRoute(routeBase)) {
+      this.redirectAfterLogin = `#/${hash}`;
+      window.location.hash = '#/login';
+      return;
+    }
+
+    // Se o usuário já estiver autenticado e navegar para #/login, redireciona para o dashboard
+    if (routeBase === 'login' && authService.isAuthenticated()) {
+      window.location.hash = '#/dashboard';
+      return;
+    }
 
     this.updatePageTitle(routeBase, routeAction);
     this.updateNavHighlight(routeBase);
@@ -153,6 +173,19 @@ export class Router {
     };
   }
 
+  async renderNFeImport() {
+    this.rootElement.innerHTML = '';
+    const { NFeImportPage } = await import('./pages/NFeImportPage.js');
+    this.currentPage = new NFeImportPage(this.rootElement);
+    this.currentPage.render();
+
+    this.currentCleanup = () => {
+      if (this.currentPage && this.currentPage.destroy) {
+        this.currentPage.destroy();
+      }
+    };
+  }
+
   async renderSuppliers() {
     this.rootElement.innerHTML = '';
     const { SuppliersPage } = await import('./pages/SuppliersPage.js');
@@ -205,10 +238,29 @@ export class Router {
     };
   }
 
+  async renderLogin() {
+    this.rootElement.innerHTML = '';
+    const { LoginPage } = await import('./pages/LoginPage.js');
+    this.currentPage = new LoginPage(this.rootElement);
+    if (this.redirectAfterLogin) {
+      this.currentPage.setRedirectUrl(this.redirectAfterLogin);
+      this.redirectAfterLogin = null;
+    }
+    this.currentPage.render();
+
+    this.currentCleanup = () => {
+      if (this.currentPage && this.currentPage.destroy) {
+        this.currentPage.destroy();
+      }
+    };
+  }
+
   updatePageTitle(route, action) {
     const titleEl = document.getElementById('page-title');
     if (titleEl) {
-      if (route === 'produtos') {
+      if (route === 'login') {
+        titleEl.textContent = 'Acesso ao Sistema';
+      } else if (route === 'produtos') {
         if (action === 'novo') titleEl.textContent = 'Novo Produto';
         else if (action === 'editar') titleEl.textContent = 'Editar Produto';
         else if (action === 'detalhes') titleEl.textContent = 'Detalhes do Produto';
@@ -220,7 +272,8 @@ export class Router {
       } else if (route === 'vendas') {
         titleEl.textContent = 'Frente de Caixa e Vendas (PDV)';
       } else if (route === 'compras') {
-        titleEl.textContent = 'Ordens de Compra e Entrada de Estoque';
+        if (action === 'importar-nfe') titleEl.textContent = 'Importar NFe (XML)';
+        else titleEl.textContent = 'Ordens de Compra e Entrada de Estoque';
       } else if (route === 'fornecedores') {
         titleEl.textContent = 'Cadastro de Fornecedores';
       } else if (route === 'cotacoes') {

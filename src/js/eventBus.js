@@ -3,7 +3,7 @@
  * Utiliza o BroadcastChannel como driver primário para comunicação multi-janela.
  */
 
-class EventBus {
+export class EventBus {
   constructor() {
     this.channelName = 'gestaopro_events';
     this.channel = null;
@@ -12,7 +12,11 @@ class EventBus {
     if (typeof BroadcastChannel !== 'undefined') {
       this.channel = new BroadcastChannel(this.channelName);
       this.channel.onmessage = (event) => {
-        this._dispatchLocal(event.data.type, event.data.payload);
+        if (!event || !event.data || typeof event.data !== 'object') return;
+        const { type, payload } = event.data;
+        if (typeof type === 'string' && type.trim().length > 0 && type.length < 100) {
+          this._dispatchLocal(type, payload);
+        }
       };
     } else {
       console.warn('[EventBus] BroadcastChannel não suportado. Fallback para EventTarget (apenas aba atual).');
@@ -85,5 +89,13 @@ export const EVENTS = {
   PWA_INSTALLABLE: 'PWA_INSTALLABLE',
   PWA_INSTALLED: 'PWA_INSTALLED',
   SYNC_STATUS_CHANGED: 'SYNC_STATUS_CHANGED',
-  SYNC_QUEUE_UPDATED: 'SYNC_QUEUE_UPDATED'
+  SYNC_QUEUE_UPDATED: 'SYNC_QUEUE_UPDATED',
+  AUTH_STATE_CHANGED: 'AUTH_STATE_CHANGED',
+  IMAGE_SYNC_STARTED: 'IMAGE_SYNC_STARTED',
+  IMAGE_SYNC_PROGRESS: 'IMAGE_SYNC_PROGRESS',
+  IMAGE_DOWNLOADED: 'IMAGE_DOWNLOADED',
+  IMAGE_SYNC_PAUSED: 'IMAGE_SYNC_PAUSED',
+  IMAGE_SYNC_RESUMED: 'IMAGE_SYNC_RESUMED',
+  IMAGE_SYNC_COMPLETED: 'IMAGE_SYNC_COMPLETED',
+  IMAGE_SYNC_ERROR: 'IMAGE_SYNC_ERROR'
 };

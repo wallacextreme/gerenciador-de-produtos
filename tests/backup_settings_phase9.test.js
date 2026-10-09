@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { BackupService, BACKUP_FORMAT } from '../src/js/services/BackupService.js';
+import { DB_VERSION } from '../src/js/db/migrations.js';
 import { productRepository } from '../src/js/repositories/ProductRepository.js';
 import { productImageRepository } from '../src/js/repositories/ProductImageRepository.js';
 import { supplierRepository } from '../src/js/repositories/SupplierRepository.js';
@@ -58,7 +59,7 @@ describe('BackupService & Settings (Phase 9)', () => {
       expect(backup.backupObject).toBeDefined();
       expect(backup.backupObject.format).toBe(BACKUP_FORMAT);
       expect(backup.backupObject.version).toBe('1.0');
-      expect(backup.backupObject.schemaVersion).toBe(1);
+      expect(backup.backupObject.schemaVersion).toBe(DB_VERSION);
       expect(backup.backupObject.checksum).toBeDefined();
       expect(backup.backupObject.checksum.length).toBeGreaterThan(10);
       expect(backup.counts.products).toBeGreaterThanOrEqual(1);

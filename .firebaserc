@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "default": "gerenciador-produtos-staging",
+    "staging": "gerenciador-produtos-staging"
+  }
+}

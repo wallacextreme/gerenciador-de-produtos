@@ -1,0 +1,89 @@
+{
+  "rules": {
+    "tenants": {
+      "$tenantId": {
+        ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+
+        "products": {
+          ".indexOn": ["productCode", "barcode", "updatedAt", "category"],
+          "$productId": {
+            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || auth.token.role === 'operator' || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+            ".validate": "newData.hasChildren(['id', 'name', 'salePriceCents']) && (!newData.hasChild('salePriceCents') || newData.child('salePriceCents').isNumber()) && (!newData.hasChild('version') || newData.child('version').isNumber())"
+          }
+        },
+
+        "inventory": {
+          ".indexOn": ["productId", "type", "date"],
+          "$movementId": {
+            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+            ".validate": "newData.hasChildren(['id', 'productId', 'quantity', 'delta', 'type']) && newData.child('quantity').isNumber()"
+          }
+        },
+
+        "sales": {
+          ".indexOn": ["productId", "date", "createdAt"],
+          "$saleId": {
+            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+            ".validate": "newData.hasChildren(['id', 'productId', 'quantity', 'totalSaleCents']) && newData.child('totalSaleCents').isNumber()"
+          }
+        },
+
+        "purchases": {
+          ".indexOn": ["date", "createdAt"],
+          "$purchaseId": {
+            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+            ".validate": "newData.hasChildren(['id', 'totalAmountCents'])"
+          }
+        },
+
+        "suppliers": {
+          ".indexOn": ["name", "document"],
+          "$supplierId": {
+            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+          }
+        },
+
+        "productSuppliers": {
+          ".indexOn": ["productId", "supplierId"],
+          "$productSupplierId": {
+            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+          }
+        },
+
+        "settings": {
+          "$settingKey": {
+            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+          }
+        },
+
+        "imageManifest": {
+          ".indexOn": ["productId", "version", "updatedAt"],
+          "$photoId": {
+            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || auth.token.role === 'operator' || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+            ".validate": "newData.hasChildren(['id', 'productId', 'url', 'version'])"
+          }
+        },
+
+        "syncMetadata": {
+          ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+          ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)"
+        }
+      }
+    },
+
+    "users": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || auth.token.role === 'admin')",
+        ".write": "auth != null && (auth.token.role === 'admin' || (auth.uid === $uid && !data.exists() && !newData.hasChild('role') && !newData.hasChild('tenantId')) || (auth.uid === $uid && data.exists() && (!newData.hasChild('role') || newData.child('role').val() === data.child('role').val()) && (!newData.hasChild('tenantId') || newData.child('tenantId').val() === data.child('tenantId').val())))"
+      }
+    }
+  }
+}

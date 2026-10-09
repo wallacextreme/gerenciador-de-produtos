@@ -2,6 +2,7 @@ import { Router } from './router.js';
 import { pwaHandler } from './utils/pwa.js';
 import { platform } from './platform/index.js';
 import { syncEngine } from './services/SyncEngine.js';
+import { authService } from './services/AuthService.js';
 import { eventBus, EVENTS } from './eventBus.js';
 
 export class App {
@@ -10,6 +11,7 @@ export class App {
     this.router = new Router();
     this.networkBadgeEl = null;
     this.syncBadgeEl = null;
+    this.authBadgeEl = null;
     this.installBtnEl = null;
     this.cleanupFns = [];
   }
@@ -25,6 +27,7 @@ export class App {
 
   renderLayout() {
     const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    const session = authService.getCurrentSession();
 
     this.rootElement.innerHTML = `
       <!-- Sidebar -->
@@ -81,6 +84,13 @@ export class App {
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/>
             </svg>
             <span>Ordens de Compra</span>
+          </a>
+
+          <a href="#/compras/importar-nfe" class="nav-link flex items-center gap-3 py-2.5 px-3 rounded-lg transition-all text-slate-300 hover:bg-slate-800 hover:text-white text-sm font-medium group">
+            <svg class="w-4.5 h-4.5 text-slate-400 group-hover:text-amber-400 transition-colors flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
+            <span>Importar NFe (XML)</span>
           </a>
 
           <a href="#/fornecedores" class="nav-link flex items-center gap-3 py-2.5 px-3 rounded-lg transition-all text-slate-300 hover:bg-slate-800 hover:text-white text-sm font-medium group">
@@ -160,6 +170,11 @@ export class App {
               <span class="w-2 h-2 rounded-full bg-blue-500"></span>
               IndexedDB Local
             </span>
+
+            <!-- Auth Session Status Badge & Actions -->
+            <div id="header-auth-badge">
+              ${this._renderAuthBadge(session)}
+            </div>
           </div>
         </header>
 
@@ -168,6 +183,38 @@ export class App {
           <!-- Router injects views here -->
         </div>
       </main>
+    `;
+  }
+
+  _renderAuthBadge(session) {
+    if (session && session.authenticated) {
+      const email = session.email || 'Operador';
+      const roleLabel = session.role === 'admin' ? 'Admin' : 'Operador';
+      return `
+        <div class="flex items-center gap-2 pl-2 border-l border-slate-200">
+          <div class="flex items-center gap-1.5 bg-slate-100 text-slate-700 px-2 py-1 rounded-lg text-xs font-medium">
+            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span class="truncate max-w-[120px]" title="${email}">${email}</span>
+            <span class="text-[9px] bg-slate-200 text-slate-600 px-1 py-0.2 rounded font-bold uppercase">${roleLabel}</span>
+          </div>
+          <button id="btn-header-logout" class="p-1 text-slate-400 hover:text-rose-600 transition-colors" title="Encerrar Sessão">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+            </svg>
+          </button>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="pl-2 border-l border-slate-200">
+        <a href="#/login" class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-bold transition">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"/>
+          </svg>
+          <span>Entrar</span>
+        </a>
+      </div>
     `;
   }
 
@@ -234,6 +281,7 @@ export class App {
   bindEvents() {
     this.networkBadgeEl = this.rootElement.querySelector('#header-network-badge');
     this.syncBadgeEl = this.rootElement.querySelector('#header-sync-badge');
+    this.authBadgeEl = this.rootElement.querySelector('#header-auth-badge');
     const installContainer = this.rootElement.querySelector('#sidebar-install-container');
     const btnInstall = this.rootElement.querySelector('#btn-sidebar-install');
 
@@ -249,8 +297,14 @@ export class App {
     });
     this.cleanupFns.push(unsubNetwork);
 
-    window.addEventListener('online', () => updateNetworkUI(true));
-    window.addEventListener('offline', () => updateNetworkUI(false));
+    const onOnline = () => updateNetworkUI(true);
+    const onOffline = () => updateNetworkUI(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    this.cleanupFns.push(() => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    });
 
     // 2. Atualização do Badge de Sincronização em Nuvem
     const updateSyncUI = (stats) => {
@@ -267,7 +321,21 @@ export class App {
     // Carrega status inicial do SyncEngine
     syncEngine.getStats().then(stats => updateSyncUI(stats)).catch(() => {});
 
-    // 3. Botão de Instalação no Sidebar (quando suportado)
+    // 3. Atualização do Badge de Sessão / Auth State
+    const updateAuthUI = (session) => {
+      if (this.authBadgeEl) {
+        this.authBadgeEl.innerHTML = this._renderAuthBadge(session);
+        this._bindLogoutButton();
+      }
+    };
+
+    const unsubAuth = eventBus.on(EVENTS.AUTH_STATE_CHANGED, (session) => {
+      updateAuthUI(session);
+    });
+    this.cleanupFns.push(unsubAuth);
+    this._bindLogoutButton();
+
+    // 4. Botão de Instalação no Sidebar (quando suportado)
     const showInstallPrompt = () => {
       if (installContainer && !platform.isDesktop() && !pwaHandler.isStandalone()) {
         installContainer.classList.remove('hidden');
@@ -301,6 +369,50 @@ export class App {
           hideInstallPrompt();
         }
       });
+    }
+
+    // 5. Banner de Atualização PWA (quando disponível)
+    const unsubUpdateReady = eventBus.on(EVENTS.PWA_UPDATE_READY, (detail) => {
+      const banner = document.getElementById('update-banner');
+      const btn = document.getElementById('btn-apply-update');
+      const btnDismiss = document.getElementById('btn-dismiss-update');
+      if (banner) {
+        banner.classList.add('show');
+        if (btn && detail && detail.applyUpdate) {
+          btn.onclick = () => {
+            detail.applyUpdate(true);
+            banner.classList.remove('show');
+          };
+        }
+        if (btnDismiss) {
+          btnDismiss.onclick = () => banner.classList.remove('show');
+        }
+      }
+    });
+    this.cleanupFns.push(unsubUpdateReady);
+  }
+
+  _bindLogoutButton() {
+    const btnLogout = this.rootElement?.querySelector('#btn-header-logout');
+    if (btnLogout) {
+      btnLogout.onclick = async () => {
+        try {
+          await authService.signOut();
+          window.location.hash = '#/login';
+        } catch (err) {
+          console.error('Falha ao deslogar:', err);
+        }
+      };
+    }
+  }
+
+  destroy() {
+    this.cleanupFns.forEach(fn => {
+      try { fn(); } catch (_) {}
+    });
+    this.cleanupFns = [];
+    if (this.router && typeof this.router.destroy === 'function') {
+      this.router.destroy();
     }
   }
 }

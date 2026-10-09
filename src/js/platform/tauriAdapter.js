@@ -17,8 +17,22 @@ export class TauriAdapter {
     return 'tauri';
   }
 
+  _isSafeExternalUrl(url) {
+    if (typeof url !== 'string' || !url.trim()) return false;
+    try {
+      const parsed = new URL(url.trim());
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch (_) {
+      return false;
+    }
+  }
+
   async openExternal(url) {
     if (typeof window !== 'undefined') {
+      if (!this._isSafeExternalUrl(url)) {
+        console.warn('[TauriAdapter] Tentativa de abrir URL insegura bloqueada:', url);
+        return;
+      }
       // Se houver API de shell do Tauri v2, pode delegar; senão, fallback seguro via window.open
       try {
         if (window.__TAURI__ && window.__TAURI__.shell && typeof window.__TAURI__.shell.open === 'function') {

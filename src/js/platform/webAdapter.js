@@ -19,8 +19,22 @@ export class WebAdapter {
     return 'web';
   }
 
+  _isSafeExternalUrl(url) {
+    if (typeof url !== 'string' || !url.trim()) return false;
+    try {
+      const parsed = new URL(url.trim());
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch (_) {
+      return false;
+    }
+  }
+
   async openExternal(url) {
     if (typeof window !== 'undefined') {
+      if (!this._isSafeExternalUrl(url)) {
+        console.warn('[WebAdapter] Tentativa de abrir URL insegura bloqueada:', url);
+        return;
+      }
       window.open(url, '_blank', 'noopener,noreferrer');
     }
   }

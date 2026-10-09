@@ -86,7 +86,10 @@
     <div id="update-banner" role="alert">
       <span>🔄 Nova versão do GestãoPro disponível!</span>
       <button id="btn-apply-update" style="background:#3b82f6;border:none;color:#fff;font-weight:700;font-size:11px;padding:4px 10px;border-radius:6px;cursor:pointer;margin-left:8px;">
-        Atualizar Agora
+        Atualizar
+      </button>
+      <button id="btn-dismiss-update" style="background:transparent;border:1px solid rgba(255,255,255,0.4);color:#fff;font-size:11px;padding:4px 8px;border-radius:6px;cursor:pointer;margin-left:4px;">
+        Depois
       </button>
     </div>
 
@@ -113,12 +116,18 @@
       window.addEventListener('pwa:update-ready', (event) => {
         const banner = document.getElementById('update-banner');
         const btn = document.getElementById('btn-apply-update');
+        const btnDismiss = document.getElementById('btn-dismiss-update');
         if (banner) banner.classList.add('show');
         if (btn && event.detail && event.detail.applyUpdate) {
-          btn.addEventListener('click', () => {
-            event.detail.applyUpdate();
+          btn.onclick = () => {
+            event.detail.applyUpdate(true);
             banner.classList.remove('show');
-          }, { once: true });
+          };
+        }
+        if (btnDismiss) {
+          btnDismiss.onclick = () => {
+            banner.classList.remove('show');
+          };
         }
       });
     </script>

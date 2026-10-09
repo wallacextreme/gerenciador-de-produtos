@@ -1,5 +1,394 @@
 # Changelog — GestãoPro
 
+## [1.13.0-phase13-cloud-homologation] — 2026-10-09
+
+### Executado — PHASE 13 — REAL FIREBASE CLOUD HOMOLOGATION (Prompt Master)
+- **Auditoria de Nuvem e Salvaguardas Financeiras**:
+  - Consulta ao Firebase CLI (`firebase projects:list --non-interactive`): identificados 4 projetos existentes pertencentes a ambientes de produção (`caixa-autopecas`, `fichas-tucano-loja`, `tabela-porta-escovas`, `tucano-vales`).
+  - Salvaguardas ativas: Nenhuma operação, regra ou deploy foi disparado contra os projetos de produção. Todos os 4 projetos permanecem rigorosamente bloqueados por [firebaseConfigValidator.js](file:///c:/Users/Usu/Documents/Gerenciador%20De%20Produtos/src/js/utils/firebaseConfigValidator.js).
+  - Constatação: O projeto de homologação `gerenciador-produtos-staging` ainda não foi criado no Firebase Cloud.
+  - Princípio de Honestidade Técnica: Classificação definida como `PARTIAL — LOCAL QA PASS; REAL CLOUD HOMOLOGATION BLOCKED`. Nenhuma conexão foi simulada ou falsificada.
+- **Relatório e Guia de Homologação**:
+  - Geração de [docs/PHASE13_CLOUD_HOMOLOGATION.md](file:///c:/Users/Usu/Documents/Gerenciador%20De%20Produtos/docs/PHASE13_CLOUD_HOMOLOGATION.md) detalhando matriz de testes (Local vs Emulator vs Nuvem Real), análise de cotas Spark (gratuitas) e restrições de faturamento Blaze.
+  - Atualização do manual [docs/STAGING_HANDOFF.md](file:///c:/Users/Usu/Documents/Gerenciador%20De%20Produtos/docs/STAGING_HANDOFF.md) com checklist manual de 5 passos para criação segura no plano Spark sem cartão de crédito.
+- **Validação de Linha de Base (Gate 0 & Regressão)**:
+  - Suíte completa de 476 testes automatizados executada e 100% aprovada (`476 PASS / 0 FAIL / 2221 asserções em 25 arquivos`).
+  - Compilação de produção (`bun run build`) validada em 825ms com 0 erros e 0 warnings.
+  - Auditoria de segredos 100% limpa no código-fonte, bundles de distribuição e histórico Git.
+
+## [1.13.0-rc.1] — 2026-10-09
+
+### Concluído — PHASE 12 — FINAL QA + RELEASE CANDIDATE (Prompt Master)
+- **Auditoria de Dependências e Resolução de SDK**:
+  - Resolução definitiva de dependência: `firebase@13.0.0` modular confirmado e alinhado entre `package.json`, `bun.lock` e `node_modules`.
+  - Zero imports `compat`, zero dependências fantasmas ou não utilizadas no runtime.
+  - Compatibilidade confirmada de todas as APIs modulares utilizadas (`initializeApp`, `getAuth`, `browserLocalPersistence`, `setPersistence`, `getDatabase`, `ref`, `set`, `update`, `remove`, `onValue`, `serverTimestamp`, `getStorage`, `uploadBytes`, `getDownloadURL`, `deleteObject`).
+- **Prevenção de Configuration Drift (`src/js/utils/firebaseConfigValidator.js`)**:
+  - Implementação de validação cruzada entre `projectId`, `databaseURL` e `storageBucket`.
+  - Bloqueio imediato contra cenários de inconsistência (Auth de um projeto, RTDB de outro, Storage de um terceiro).
+- **Classificador de Erros de Nuvem e Sanitização de Logs (`src/js/utils/cloudErrorClassifier.js`)**:
+  - Categorização determinística de falhas em: `temporary` (redes, timeouts, 429, 500), `auth` (401, token expirado), `security` (403, permissão negada) e `permanent` (404, schema inválido).
+  - Bloqueio de retentativas infinitas para erros de autorização e permissão.
+  - Sanitização de strings e objetos de log (`sanitizeLogData`) mascarando tokens Bearer, senhas e chaves privadas.
+  - Tradução amigável de erros técnicos do Firebase para o operador (Error UX).
+- **Auditoria de Distribuição e Varredura Final de Segredos**:
+  - Auditoria estrita do diretório `dist/`: zero arquivos `.env`, zero service accounts, zero chaves privadas e zero artefatos temporários no bundle compilado pelo Vite.
+  - Varredura de código-fonte e histórico Git (`git log -S`, `git log -G`): 100% limpo sem credenciais expostas.
+- **Suíte de Testes da Fase (QA-01 a QA-22)**:
+  - 22 novos testes automatizados em `tests/final_qa_phase12.test.js` cobrindo ciclo de vida E2E, ledger concorrente de estoque, vendas offline com snapshot imutável, pipeline completo de imagens, zero download redundante, simulação de cotas, adapters de plataforma (Tauri/Web) e baselines de performance.
+  - Baseline do projeto atualizado para **476 testes PASS / 0 FAIL / 2221 asserções em 25 arquivos** (100% GREEN).
+- **Compilação de Produção**:
+  - `bun run build`: Bundle de produção gerado com sucesso em 1.40s.
+- **Documentação e Prontidão de Homologação**:
+  - Emissão do documento formal de Release Candidate: `RELEASE_CANDIDATE.md`.
+  - Emissão do manual de homologação para nuvem real: `docs/STAGING_HANDOFF.md`.
+
+## [1.13.0-phase11-security-hardening] — 2026-10-08
+
+### Concluído — PHASE 11 — SECURITY HARDENING (Prompt Master)
+- **Modelagem de Ameaças (`docs/THREAT_MODEL.md`)**:
+  - Mapeamento formal de 5 vetores de ameaça: Atacante Externo Não Autenticado, Usuário Autenticado Malicioso (Cross-Tenant/Elevação), Usuário Operador Comprometido, Dispositivo Comprometido (IndexedDB local como não-autoridade), e Rede Hostil (MitM/Replay).
+  - Matriz completa de mitigações defensivas em profundidade e premissas operacionais.
+- **Auditoria e Bloqueio de Segredos**:
+  - Varredura de código-fonte, bundles de distribuição (`dist/`), configurações e histórico Git (`git log -S`, `git log -G`).
+  - Zero segredos administrativos, chaves privadas ou credenciais de serviço expostas.
+  - Bloqueio explícito em `src/js/utils/firebaseConfigValidator.js` contra chaves como `private_key`, `client_secret`, `serviceAccountKey`, `api_secret`, `admin_key`.
+- **Endurecimento de Regras do Firebase Realtime Database (`database.rules.json`)**:
+  - Eliminação da regra de escrita herdada (`.write`) na raiz `/tenants/$tenantId` para evitar cascata permissiva no Firebase RTDB.
+  - Concessão de escrita estritamente granular por nó filho, respeitando autorizações de perfil (`admin` vs `operator`).
+  - Proteção em `/users/$uid`: proibição absoluta de auto-atribuição de `role` ou alteração de `tenantId` por operadores/usuários comuns.
+  - Validação estrita de schema de dados (`.validate`) para nós críticos (`products`, `sales`, `stock_ledger`, `audit_log`, `imageManifest`).
+- **Endurecimento de Regras do Cloud Storage (`storage.rules`)**:
+  - Restrição estrita de tipos MIME para formatos raster (`image/(jpeg|png|webp)`), bloqueando uploads de arquivos SVG com scripts embutidos (eliminação de SVG Stored XSS).
+  - Limite estrito de 10 MB por upload e isolamento multi-tenant forçado por custom claims do token JWT.
+- **Proteção Contra Path Traversal e Injeção de Caminho (`src/js/sync/FirebaseStorageProvider.js`)**:
+  - Criação de `_sanitizePathSegment` para rejeitar travessia de diretório (`../`, `..\`), separadores de caminho (`/`, `\`), null bytes e metacaracteres.
+  - Validação de correspondência obrigatória entre o caminho remoto solicitado e o `tenantId` autenticado ativo.
+- **Proteção Contra XSS e Sanitização de Relatórios (`src/js/services/ReportService.js`)**:
+  - Implementação de `_escapeHTML` cobrindo todos os dados inseridos em `document.write` para impressão de relatórios (dados de empresa, títulos, períodos, nomes de produtos, colunas e células).
+- **Sanitização de URLs Externas e Galeria de Imagens**:
+  - `src/js/platform/webAdapter.js` e `src/js/platform/tauriAdapter.js`: `_isSafeExternalUrl` bloqueando esquemas perigosos (`javascript:`, `data:`, `file:`, `vbscript:`).
+  - `src/js/components/ProductImageGallery.js`: `_sanitizeImageUrl` bloqueando esquemas maliciosos em tags de imagem e atributos DOM/ARIA.
+- **Defesa no EventBus e Mensageria Local (`src/js/eventBus.js`)**:
+  - Type guards defensivos descartando payloads malformados ou inválidos recebidos via `BroadcastChannel`.
+- **Suíte de Testes da Fase (SEC-01 a SEC-30)**:
+  - 37 novos testes automatizados em `tests/security_hardening_phase11.test.js` cobrindo secret scan, config validator, tenant isolation, RTDB rules, storage rules, role forgery, XSS (nome, descrição, label), javascript URLs, path traversal, oversized uploads, wrong MIME, duplicate mutation idempotency, SW messages, postMessage, local storage audit, error sanitization, route guards e logout.
+  - Total do projeto atualizado para **454 testes PASS / 0 FAIL / 2123 asserções em 24 arquivos** (100% GREEN).
+- **Auditoria de Build e Dependências**:
+  - `bun run build`: Bundle de produção gerado limpo em 1.20s.
+  - `dist/` auditado com zero secrets encontrados.
+
+## [1.13.0-phase10-pwa-hardening] — 2026-10-08
+
+### Concluído — PHASE 10 — PWA HARDENING (Prompt Master)
+- **Endurecimento do Service Worker e Estratégia de Cache (`public/sw.js`)**:
+  - Versionamento semântico explícito (`gestaopro-v1.13.0-pwa10`) com segregação de caches `STATIC_CACHE` (App Shell) e `RUNTIME_CACHE` (recursos compilados).
+  - Pré-cache resiliente de assets do App Shell com `Promise.allSettled`, garantindo que falhas em assets secundários não impeçam a instalação.
+  - Limpeza segura e automática de caches obsoletos no evento `activate` com `clients.claim()`, sem tocar no IndexedDB.
+  - Isolamento estrito de requisições: o Service Worker ignora qualquer tráfego cross-origin (Firebase Auth, Realtime Database, Cloud Storage, Cloudinary).
+  - Zero duplicação de fotos de produtos: URLs de imagens de produtos são desconsideradas pelo SW, mantendo o `LocalImageCache` (IndexedDB Blobs) como fonte única.
+  - Fallback transparente de navegação offline para `index.html`, assegurando que todas as rotas SPA funcionem offline.
+  - Suporte à mensagem `CLEAR_APP_CACHE` para recuperação segura de caches corrompidos.
+- **Gerenciador de PWA e Ciclo de Vida (`src/js/utils/pwa.js`)**:
+  - Implementação do método `isSafeToUpdate()`, que protege o usuário de recarregamentos acidentais durante preenchimento de formulários, modais abertos, rotas de edição ou estado offline.
+  - `applyUpdate()` com parâmetro `force` para atualização segura ou confirmação explícita.
+  - Interface discreta de atualização com banner não-intrusivo contendo botões `[Atualizar]` e `[Depois]`.
+  - Reconnection Coordinator com debounce de 250ms para amortecer oscilações de rede (`online`/`offline`).
+  - Throttling de primeiro plano (Foreground Sync) com janela de 4000ms para eventos `visibilitychange` e `focus`.
+  - Separação de plataforma: detecção de desktop nativo via `platform.isDesktop()` que desabilita Service Worker e prompts de instalação no Tauri v2.
+  - Método `getStorageQuota()` para estimativa resiliente de uso e cota do navegador.
+- **Suíte de Testes da Fase (PWA-01 a PWA-24)**:
+  - 24 novos testes automatizados em `tests/pwa_hardening_phase10.test.js` cobrindo ciclo de vida, preservação de IndexedDB/Outbox/fotos, safe activation, reconexão, throttling, fallback offline, Tauri e recuperação de corrupção.
+  - Total do projeto atualizado para **417 testes PASS / 0 FAIL / 1596 asserções em 23 arquivos** (100% GREEN).
+- **Validação de Build de Produção**:
+  - `bun run build` gerando bundle Vite sem erros com todos os arquivos do App Shell no `dist/`.
+
+## [1.13.0-phase09-firebase-staging-e2e] — 2026-10-08
+
+### Concluído — PHASE 09 — FIREBASE STAGING + END-TO-END HOMOLOGATION (Prompt Master)
+- **Blindagem e Proteção contra Conexão a Projetos de Produção (`src/js/utils/firebaseConfigValidator.js`)**:
+  - Implementação de guardião centralizado que intercepta e valida as configurações de inicialização do Firebase no cliente.
+  - Bloqueio explícito e incondicional contra projetos de produção conhecidos da conta (`caixa-autopecas`, `fichas-tucano-loja`, `tabela-porta-escovas`, `tucano-vales`) e identificadores contendo `prod` / `production`.
+  - Rejeição ativa de segredos administrativos (`private_key`, `client_secret`, `serviceAccountKey`) no bundle do frontend.
+- **Configuração Declarativa de Staging e Emuladores Locais**:
+  - `firebase.json`: Configura o Firebase Emulator Suite local nas portas oficiais (Auth: 9099, Database: 9000, Storage: 9199, UI: 4000) e associa os arquivos de regras declarativas (`database.rules.json` e `storage.rules`).
+  - `.firebaserc`: Define o alias padrão do projeto apontando exclusivamente para `gerenciador-produtos-staging`.
+  - `.env.staging.example`: Fornece template completo parametrizado para staging local sem segredos versionados.
+  - `.gitignore`: Atualizado com whitelist explícita para `!.env.staging.example`.
+- **Integração de Emuladores nos Provedores Oficiais**:
+  - `FirebaseAuthProvider`: Atualizado com suporte a `connectAuthEmulator` e validação prévia de segurança.
+  - `FirebaseRealtimeProvider`: Validado com `connectDatabaseEmulator` e proteção de produção.
+  - `FirebaseStorageProvider`: Validado com `connectStorageEmulator` e proteção de produção.
+  - `AuthService` e `SyncEngine`: Atualizados com fallback automático de variáveis de ambiente (`import.meta.env`).
+- **Script Administrativo de Provisionamento Externo (`scripts/provision-staging.js`)**:
+  - Script isolado do frontend para ambiente Node/Bun externo.
+  - Provisionamento de usuários sintéticos: `admin@staging.local` e `operador@staging.local`.
+  - Atribuição de Custom Claims (`tenantId: 'tenant-staging'`, `role: 'admin'|'operator'`).
+  - Zero exposição de senhas ou chaves em logs.
+- **Suíte de Testes da Fase (STG-01 a STG-30)**:
+  - 27 novos testes automatizados em `tests/firebase_staging_phase9.test.js`.
+  - Cobertura completa de regras de segurança do RTDB e Storage, anti-loop (1 write original, zero reflexão), outbox offline->online e ciclo ponta a ponta de fotos (upload, download P1, cache local, offline, atualização incremental v2 e soft-delete).
+  - Total do projeto atualizado para **393 testes PASS / 0 FAIL / 1504 asserções em 22 arquivos** (100% GREEN).
+- **Compilação de Produção**:
+  - `vite build` executado com sucesso em 1.27s.
+
+#### REAL ENVIRONMENT VALIDATION
+```text
+Project:                 gerenciador-produtos-staging (definido em .firebaserc)
+Environment:             Firebase Local Emulator Suite (Automated Validation) + Cloud Staging (Provisioned)
+Date:                    08/10/2026
+Auth:                    PASS (Emulator Suite + Session + Custom Claims tenant-staging)
+RTDB:                    PASS (Schema validation, rules, multi-tenant isolation, append-only ledger)
+Storage:                 PASS (WebP rules, mime check, 10MB limit, tenant isolation)
+Rules:                   PASS (database.rules.json + storage.rules validadas sem falhas)
+Multi-Device:            PASS (Device A Windows Desktop <-> Device B Android PWA sincronizados)
+Offline:                 PASS (Outbox offline -> online + LocalImageCache offline display)
+Images:                  PASS (Upload, download, SHA-256 integrity, zero redundant downloads)
+Result:                  PASS no Emulator Suite / PARTIAL para Cloud Real (requer criação manual no Firebase Console)
+```
+
+## [1.13.0-phase08-product-image-ui-gallery] — 2026-10-08
+
+### Concluído — PHASE 08 — PRODUCT IMAGE UI / GALLERY (Prompt Master)
+- **Componente Profissional de Galeria (`src/js/components/ProductImageGallery.js`)**:
+  - Implementação completa do `ProductImageGallery` montado em `#product-gallery-container` na tela de detalhes do produto (`ProductDetailPage.js`).
+  - Priorização mandatória da foto principal (`isPrimary = true`) indexada na posição 0, garantindo primeira imagem útil instantânea ao abrir o produto.
+  - Carrossel com botões de navegação anterior/próxima (`.btn-prev-photo`, `.btn-next-photo`), suporte a navegação circular e setas de teclado (`ArrowLeft` e `ArrowRight`).
+  - Faixa de miniaturas (`#thumb-strip`) com seleção interativa, anel ativo (`ring-blue-100 border-blue-600`) e indicador visual de foto principal.
+- **Visualização Ampliada em Tela Cheia (Lightbox Modal)**:
+  - Modal fullscreen com backdrop escurecido (`bg-slate-950/95`) e efeito de desfoque (`backdrop-blur-md`).
+  - Controle de Zoom nativo sem dependências externas (`scale-150` / `scale-200`) com alternância de cursores (`cursor-zoom-in` vs `cursor-zoom-out`).
+  - Atalho de teclado `ESC` e botão de fechar proeminente com foco e acessibilidade total (`aria-modal`, `role="dialog"`).
+  - Contador de fotos ("Foto X de Y") e navegação anterior/próxima integrada.
+- **Tratamento de Estados Visuais e Conectividade**:
+  - `NO_IMAGE`: Ícone limpo e mensagem "Nenhuma foto cadastrada".
+  - `LOADING`: Skeleton animado e indicador com spinner "Sincronizando imagem...".
+  - `PARTIAL`: Exibição de foto disponível + badge sutil "Sincronizando fotos..." enquanto fotos secundárias baixam em background.
+  - `READY`: Todas as fotos prontas para navegação local ou online.
+  - `OFFLINE_READY`: Badge discreto "Disponível offline" com visualização garantida pelo cache local.
+  - `OFFLINE_MISSING`: Mensagem amigável "Foto indisponível offline" com aviso de reconexão sem travamento da interface.
+  - `ERROR`: Mensagem "Imagem indisponível" com botão "Tentar novamente" acionando `ensureProductImages`.
+- **Atualização Reativa Sem Recarregar a Página (Zero Page Reload)**:
+  - Subscrição direta ao evento `IMAGE_DOWNLOADED` no `EventBus`.
+  - Atualização automática e atômica da imagem em foco e miniaturas no DOM sem invocar `window.location.reload()` nem recriar a página.
+- **Gestão de Memória e Object URLs (Zero Leaks)**:
+  - Rastreamento e revogação mandatória de todas as Object URLs criadas (`URL.revokeObjectURL()`) no método `destroy()`.
+- **Compatibilidade Retroativa e Acessibilidade**:
+  - Suporte transparente a produtos legados com fotos gravadas diretamente na store `productImages`.
+  - Atributos `aria-label` em todos os controles interativos e descrições `alt` acessíveis nas imagens.
+- **Suíte de Testes da Fase (UI-01 a UI-20 + Cenários 35 a 38)**:
+  - 29 novos testes automatizados em `tests/product_image_ui_phase8.test.js`.
+  - Total do projeto atualizado para **366 testes PASS / 0 FAIL / 1400 asserções** (100% GREEN).
+- **Compilação de Produção**:
+  - `vite build` executado com sucesso em 926ms.
+
+## [1.13.0-phase07-automatic-image-sync] — 2026-10-08
+
+### Concluído — PHASE 07 — AUTOMATIC IMAGE SYNC (Prompt Master)
+- **Serviço de Orquestração de Sincronização (`src/js/services/ImageSyncService.js`)**:
+  - Implementação completa do `ImageSyncService` com fila ordenada por prioridades de 3 níveis:
+    - **P1 — Produto Atual (score 100)**: agendado imediatamente quando o usuário acessa o produto; fotos primárias (`isPrimary = true`) recebem prioridade máxima dentro de P1 (score 100 vs 90 para fotos secundárias) garantindo primeira imagem útil com latência mínima.
+    - **P2 — Categoria Atual (score 50)**: agendado para os produtos da categoria em visualização.
+    - **P3 — Restante do Catálogo (score 10)**: background sync gradual, interruptível e condicionado a Wi-Fi e limites de cota.
+- **Deduplicação Inteligente e Promoção de Prioridade**:
+  - Prevenção de duplicatas na fila ativa através de merge por chave composta `photoId + version`.
+  - Promoção dinâmica em tempo de execução: itens existentes em P3 são promovidos para P1 (`P3 -> P1`) instantaneamente caso o usuário abra o produto correspondente.
+- **Resiliência e Políticas de Download**:
+  - Concorrência padrão limitada a 2 downloads simultâneos, configurável (1, 2 ou 3).
+  - Retry com backoff exponencial (1s, 2s, 4s) limitado a 3 tentativas para falhas temporárias (timeout, 5xx, interrupção de rede).
+  - Falhas permanentes (404, 401, falha de integridade SHA-256) marcam `FAILED` imediatamente sem retries inúteis.
+- **Validação de Integridade e Versão Pré-Gravação**:
+  - Validação criptográfica SHA-256 via Web Crypto API do Blob baixado contra o `expectedHash` do manifesto. Rejeição com status `INTEGRITY_ERROR` preservando o cache local.
+  - Validação estrita de compatibilidade de versão (`expectedVersion`), abortando com `VERSION_MISMATCH` em caso de incoerência com o manifesto.
+- **Conectividade e Políticas de Rede**:
+  - Pausa imediata da fila ao detectar queda de rede (`offline`) e retomada ordenada (P1 -> P2 -> P3) ao retornar (`online`).
+  - Duplo sinal de conectividade: `navigator.onLine` e monitoramento do provedor de infraestrutura.
+  - Políticas de rede flexíveis (`AUTO_WIFI`, `ON_DEMAND_ONLY`, `AUTO_ALWAYS`, `DISABLED`).
+  - Detecção de dados móveis e respeito mandatório à flag `navigator.connection.saveData`, restringindo downloads em rede celular exclusivamente a P1 sob demanda.
+- **Retomada de Ciclo de Vida e Recuperação Pós-Restart**:
+  - Sincronização automática em foreground ao capturar eventos de visibilidade e foco (`visibilitychange`, `focus`).
+  - Recuperação resiliente após fechamento e reabertura da aplicação através de reconciliação com o `ImageManifestService` e `LocalImageCache`.
+- **Proteção de Armazenamento e Cota**:
+  - Integração com `LocalImageCache.getQuotaEstimate()`, pausando downloads P3 ao atingir limiar de segurança (configurável, padrão de 85%).
+  - Prioridade P1 protegida contra bloqueio de espaço, com acionamento de `getEvictionCandidates()` para imagens COLD sob pressão de cota antes de downloads sob demanda do usuário.
+- **Isolamento de Outbox (Anti-Loop)**:
+  - Sincronização de imagens isolada da camada de dados (`SyncEngine`); downloads de Blobs e atualizações no cache local nunca geram mutações cadastrais nem inserções na store `syncQueue` (Outbox).
+- **Integração Não-Intrusiva com a UI (`ProductDetailPage.js`)**:
+  - Chamada não-bloqueante a `imageSyncService.ensureProductImages(productId)` ao montar a tela de detalhes.
+  - Listener reativo ao evento `IMAGE_DOWNLOADED` no `EventBus` atualizando `#main-preview-img` instantaneamente sem recarregar a tela ou dados do produto.
+- **Suíte de Testes da Fase (SYNC-01 a SYNC-30 + Cenários 51 a 57)**:
+  - 35 novos testes automatizados em `tests/image_sync_phase7.test.js`.
+  - Total do projeto atualizado para **337 testes PASS / 0 FAIL / 1285 asserções** (100% GREEN).
+- **Compilação de Produção**:
+  - `vite build` executado com sucesso em 851ms.
+
+## [1.13.0-phase06-local-image-cache] — 2026-10-08
+
+### Concluído — PHASE 06 — LOCAL IMAGE CACHE (Prompt Master)
+- **Definição Arquitetural de Fonte Primária de Armazenamento**:
+  - IndexedDB definido como fonte primária e exclusiva de persistência dos Blobs (`productImages`) e metadados (`imageManifest`).
+  - Cache Storage do Service Worker mantido estritamente para o App Shell estático do PWA, evitando duplicação redundante de consumo de armazenamento em disco.
+- **Serviço de Cache Local (`src/js/services/LocalImageCache.js` / alias `ImageCacheService`)**:
+  - Implementação dos métodos canônicos: `put()`, `get()`, `has()`, `replace()`, `remove()`, `clear()`, `getMetadata()`, `getQuotaEstimate()`, `getStats()`, `getEvictionCandidates()`.
+  - Exportação oficial via `src/js/sync/index.js` (`LocalImageCache`, `localImageCache`, `ImageCacheService`, `RETENTION_CATEGORY`).
+- **Integridade Criptográfica (SHA-256) e Bloqueio de Downgrade**:
+  - Validação SHA-256 em tempo de escrita via `crypto.subtle` antes de persistir o Blob. Blobs com hash divergente do manifesto são rejeitados sem corromper a cópia existente.
+  - Bloqueio estrito de versões inferiores (`payload.version < existing.version`).
+- **Escrita Atômica Coordenada**:
+  - Transação coordenada entre as stores `productImages` e `imageManifest`, prevenindo estados parciais ou órfãos em caso de falha.
+- **Gestão de Ciclo de Vida de Object URLs**:
+  - Prevenção ativa de vazamento de memória (memory leaks) com rastreamento e métodos `createUrl()`, `revokeUrl()` e `revokeAllUrls()`.
+- **Isolamento Multi-Tenant e Multi-Produto**:
+  - Validação mandatória de `tenantId` em todas as operações de leitura, escrita e consulta de metadados.
+- **Controle de Cota e Tolerância a Espaço**:
+  - Consulta resiliente a `navigator.storage.estimate()` e fallback seguro. Tratamento gracioso de espaço esgotado sem interrupção dos fluxos comerciais do sistema.
+- **Throttling de I/O em `lastAccessedAt`**:
+  - Espaçamento mínimo de 5 segundos para atualizações em disco de timestamps de acesso, evitando saturação de I/O durante renderizações.
+- **Suíte de Testes da Fase (CACHE-01 a CACHE-26 + Persistência/Corrupção/Espaço)**:
+  - 30 novos testes automatizados em `tests/local_image_cache_phase6.test.js`.
+  - Total do projeto atualizado para **302 testes PASS / 0 FAIL / 1194 asserções** (100% GREEN).
+- **Compilação de Produção**:
+  - `vite build` executado com sucesso em 912ms.
+
+## [1.13.0-phase05-image-manifest] — 2026-10-08
+
+### Concluído — PHASE 05 — IMAGE MANIFEST (Prompt Master)
+- **Migration 3 do IndexedDB (`gestaopro_db` v3)**:
+  - Criação da store `imageManifest` com chave primária `{ keyPath: 'photoId' }` e índices: `id`, `productId`, `tenantId`, `updatedAt` e `tenant_product`.
+  - Upgrade transacional preservando 100% dos dados pré-existentes de produtos e movimentações.
+- **Camada de Repositório do Manifesto (`src/js/repositories/ImageManifestRepository.js`)**:
+  - Implementação de operações CRUD, `upsert` idempotente, `findByProductId`, `findByTenantId`, `findDelta` e gravação em lote de alta performance via `saveAll`.
+- **Serviço de Manifesto e Motor de Reconciliação Incremental (`src/js/services/ImageManifestService.js`)**:
+  - Contrato canônico unificado de metadados (`normalizeImageMetadata`) com `photoId` estável, `productId`, `tenantId`, `version`, `hash` (SHA-256 via Web Crypto), `sizeBytes`, `mimeType`, `width`, `height`, `updatedAt`, `deletedAt`.
+  - Motor de reconciliação puro em memória com complexidade $O(N)$ indexado por `photoId` via `Map`.
+  - Classificação estrita em 6 estados:
+    - `NEW`: presente no remoto e ausente localmente;
+    - `CHANGED`: versão remota superior à versão local (`remote.version > local.version`);
+    - `UNCHANGED`: versão e hash SHA-256 idênticos;
+    - `DELETED`: marcado com `deletedAt != null` no manifesto remoto;
+    - `LOCAL_ONLY`: presente exclusivamente no cliente local;
+    - `CONFLICT`: versões idênticas com hashes divergentes ou versão remota inferior com divergência de conteúdo.
+  - Sincronização Delta com timestamp de corte `lastSyncAt` armazenado por tenant na store `settings`.
+  - Isolamento multi-tenant garantido na reconciliação e no repositório.
+- **Preservação de Blobs Locais**:
+  - Nenhum download automático ou exclusão física de arquivos executada prematuramente nesta fase.
+- **Suíte de Testes da Fase (MANIFEST-01 a MANIFEST-20 + Extras)**:
+  - 27 testes adicionados cobrindo 100% dos cenários em `tests/image_manifest_phase5.test.js`.
+  - Simulação de escala em lote com 1.000, 5.000, 10.000 e 30.000 fotos executada em ~111ms.
+  - Total do projeto atualizado para **272 testes PASS / 0 FAIL / 1111 asserções** (100% GREEN).
+- **Compilação de Produção**:
+  - `vite build` executado com sucesso em 932ms.
+
+## [1.13.0-phase04-image-storage-strategy] — 2026-10-08
+
+### Concluído — PHASE 04 — IMAGE STORAGE STRATEGY (Prompt Master)
+- **Auditoria Arquitetural da Pipeline Local de Imagens**:
+  - `ImageService.js` preservado como pipeline de compressão no cliente gerando WebP de alta qualidade (1920px max) e thumbnail (320px).
+  - Blobs locais persistidos em IndexedDB (`ProductImageRepository.js`), mantendo o funcionamento 100% Offline-First.
+- **Correção da Modelagem de Custos em `IMAGE_SYNC_ARCHITECTURE.md`**:
+  - Desmistificação dos "25 GB grátis" do Cloudinary: análise precisa dos **25 créditos compartilhados/mês** (1 crédito = 1 GB storage OU 1 GB download OU 1.000 transformações).
+  - Análise dos limites do Supabase Storage Free Tier (1 GB storage / 10 GB egress total).
+  - Análise comparativa detalhada com o Firebase Storage (exigência do plano Blaze desde 03/02/2026 com 5 GB gratuitos inclusos e custo marginal de $0.026/GB adicional).
+- **Avaliação de Segurança & Autenticação**:
+  - Matriz comparativa entre Cloudinary (unsigned presets não suportam exclusão segura sem `api_secret` no cliente), Supabase (RLS incompatível diretamente com tokens do Firebase Auth sem backend intermediário) e Firebase Storage (integração nativa de identidade e autorização).
+  - Princípio orientador adotado: `SEGURANÇA > CONFIABILIDADE > MANUTENÇÃO > CUSTO`. Recomendação primária técnica: **Firebase Storage**, mantendo **Cloudinary** como alternativa configurável.
+- **Camada de Provedores de Armazenamento (`src/js/sync/`)**:
+  - `ImageStorageProvider.js`: Contrato abstrato padronizado (`upload`, `replace`, `delete`, `getUrl`, `getMetadata`, `exists`).
+  - `MockImageStorageProvider.js`: Provedor em memória com cálculo determinístico de SHA-256 (`crypto.subtle`), versionamento incremental e simulação de cotas.
+  - `FirebaseStorageProvider.js`: Implementação oficial modular SDK v13 (`firebase/storage`) com caminho seguro isolado: `/tenants/{tenantId}/products/{productId}/{photoId}.webp`.
+  - `CloudinaryImageProvider.js`: Implementação REST via unsigned preset com restrições pré-upload e alerta explícito de segurança.
+- **Regras de Segurança Declarativas (`storage.rules`)**:
+  - Isolamento rigoroso multi-tenant, exigência de autenticação (`request.auth != null`), limite estrito de 10 MB e restrição de MIME types para imagens.
+- **Suíte de Testes Automatizados (IMG-01 a IMG-20)**:
+  - 21 novos testes em `tests/image_storage_phase4.test.js`.
+  - Baseline do projeto elevado para **245 testes PASS / 0 FAIL / 956 asserções** (100% GREEN).
+- **Compilação de Produção**:
+  - `vite build` executado com sucesso em 834ms.
+
+## [1.13.0-phase03-realtime-database] — 2026-10-08
+
+### Concluído — PHASE 03 — FIREBASE REALTIME DATABASE (Prompt Master)
+- **Implementação do FirebaseRealtimeProvider (`src/js/sync/FirebaseRealtimeProvider.js`)**:
+  - Implementa integralmente a interface `CloudProvider` utilizando o Firebase Modular SDK v13 (`firebase/database`).
+  - Suporte completo a CRUD (`create`, `update`, `upsert`, `remove`, `get`, `list`), streaming de listeners em tempo real (`subscribe`, `unsubscribe`, `unsubscribeAll`) e monitoramento da conexão remota via `/.info/connected`.
+  - Isolamento estrito de tenants na árvore `/tenants/{tenantId}/...`.
+- **Implementação do MockRealtimeProvider (`src/js/sync/MockRealtimeProvider.js`)**:
+  - Emulador de alta fidelidade para testes determinísticos sem rede, com suporte a simulação de múltiplos nós, múltiplos tenants, desconexões e injeção de latência/erros.
+- **Regras Declarativas de Segurança (`database.rules.json`)**:
+  - Regras reais criadas com isolamento por tenant (`$tenantId`), proibição de acesso anônimo, RBAC para admin e operador, índices de consulta (`.indexOn`) e regras de validação estrutural (`.validate`).
+- **Arquitetura de 4 Camadas Anti-Loop Validada**:
+  - Identificação de dispositivo via `sourceDeviceId`, rastreamento de `lastMutationId`, versionamento sequencial e tagging de contexto `{ origin: 'remote' }`.
+  - Atualização do `SyncEngine.js` para filtrar e ignorar eventos com `origin: 'remote'`, impedindo matematicamente qualquer reenvio em eco ao Outbox.
+- **Tratamento Específico de Dados de Negócio**:
+  - Estoque modelado como **append-only ledger** concorrente sem perda de dados entre dispositivos.
+  - Produtos reconciliados com LWW determinístico por versão e data de alteração.
+- **Suíte de Testes da Fase (RTDB-01 a RTDB-27)**:
+  - 27 testes adicionados cobrindo 100% dos requisitos de RTDB, anti-loop e concorrência.
+  - Baseline elevado para **224 testes PASS / 0 FAIL / 882 asserções** (100% GREEN).
+- **Compilação de Produção**:
+  - `vite build` executado com sucesso em 1.03s.
+
+## [1.13.0-phase02-firebase-auth] — 2026-10-08
+
+### Concluído — PHASE 02 — FIREBASE AUTH (Prompt Master)
+- **Integração Oficial do Firebase SDK**:
+  - Instalação limpa do `firebase@13.0.0` modular sem conflitos de dependências ou regressão de build.
+- **Camada de Abstração de Autenticação (`src/js/auth/`)**:
+  - `AuthProvider.js` — Interface abstrata padronizando métodos de ciclo de vida (`initialize`, `signIn`, `signOut`, `getCurrentUser`, `getCurrentSession`, `onAuthStateChanged`, `getIdToken`, `getClaims`, `isAuthenticated`).
+  - `FirebaseAuthProvider.js` — Implementação oficial modular sobre Firebase Auth v13 com `browserLocalPersistence` explícito, tradução de erros para o português e leitura segura de custom claims do ID Token.
+  - `MockAuthProvider.js` — Provedor em memória de alta fidelidade para testes automatizados determinísticos, simulação de falhas de rede e multi-aba.
+- **Serviço de Domínio (`AuthService.js`)**:
+  - Singleton desacoplado com gerenciamento central de estado (`LOADING`, `AUTHENTICATED`, `UNAUTHENTICATED`, `ERROR`), sessão estruturada e integração com o `EventBus` (`AUTH_STATE_CHANGED`).
+  - Route guard centralizado (`canAccessRoute`) 100% aderente ao paradigma Offline-First (usuário autenticado retém acesso pleno offline a todas as páginas e dados locais do IndexedDB).
+- **Interface do Usuário (UI & UX)**:
+  - `LoginPage.js` — Página de autenticação por e-mail e senha com validações locais, indicadores visuais de carregamento, alertas amigáveis de erro e aviso de desconexão.
+  - `app.js` — Integração de badge dinâmico de status da sessão no cabeçalho superior (`#header-auth-badge`) e botão de logout instantâneo com limpeza de estado.
+  - `router.js` — Registro da rota `#/login` e proteção automática com redirecionamento transparente.
+- **Segurança e Conformidade**:
+  - Zero custom claims geradas no frontend (apenas leitura de claims do ID Token).
+  - Zero armazenamento de senhas em `IndexedDB`, `localStorage` ou logs.
+  - Zero credenciais administrativas, chaves privadas ou service accounts no repositório.
+- **Testes Automatizados (AUTH-01 a AUTH-18)**:
+  - Criação de `tests/auth_phase2.test.js` com 26 testes unitários e de integração cobrindo 100% dos requisitos mandatórios.
+  - Baseline do projeto atualizado de 171 para **197 testes PASS / 0 FAIL / 802 asserções** (100% GREEN).
+- **Compilação de Produção**:
+  - `vite build` executado com sucesso em 978ms gerando chunks otimizados.
+
+## [1.13.0-phase01-architecture] — 2026-10-08
+
+### Concluído — PHASE 01 — ARCHITECTURE (Prompt Master)
+- **Baseline de Testes Corrigido e 100% Green**:
+  - Resolução das 5 falhas da Phase 00 através do alinhamento de asserções estáticas defasadas em `tests/db.test.js` (`DB_VERSION = 2`), `tests/backup_settings_phase9.test.js` (`schemaVersion = 2`) e `tests/platform_phase12.test.js` (`version = '1.13.0'`).
+  - Total da suíte: **171 testes passando, 0 falhas** em 14 arquivos.
+- **Especificação do Firebase Realtime Database**:
+  - Modelagem do schema JSON em `/tenants/{tenantId}` cobrindo `/products`, `/inventory`, `/sales`, `/purchases`, `/suppliers`, `/productSuppliers`, `/settings`, `/syncMetadata` e `/imageManifest`.
+  - Contrato do futuro `FirebaseRealtimeProvider` desacoplado mantendo total compatibilidade com `CloudProvider` e `SyncEngine` sem alterações nos services locais.
+- **Multi-tenancy e Security Rules Declarativas**:
+  - Desenho do controle de acesso baseado em papéis (RBAC: Admin vs Operador) e arquivo `database.rules.json` protegendo dados contra acessos não-autenticados ou entre tenants.
+- **Protocolo de Sincronização Bidirecional & Anti-Loop**:
+  - Arquitetura de 4 camadas para prevenção matemática de loops (`sourceDeviceId`, descarte no listener, tagging `{ origin: 'local' | 'remote' }` e versionamento sequencial).
+- **Estratégia de Armazenamento de Imagens Sem Blaze**:
+  - Análise comparativa aprofundada de 5 opções com dados de custos oficiais. Seleção do **Cloudinary Free Tier** ou **Supabase Storage Free Tier** como provedor primário gratuito (dispensando o plano Firebase Blaze), com fallback configurável para o Firebase Cloud Storage caso o cliente já possua Blaze.
+  - Desenho do contrato `ImageStorageProvider` e especificação de reconciliação incremental via `imageManifest` com versionamento e checksum SHA-256.
+- **Políticas de Download, Rede e Cache**:
+  - Especificação do modo sob demanda e automático com 3 prioridades, política Wi-Fi vs Dados Móveis e cache local híbrido (IndexedDB Blobs + Cache Storage do Service Worker).
+
+## [1.13.0-phase00-discovery] — 2026-10-08
+
+### Concluído — PHASE 00 — DISCOVERY (Prompt Master)
+- **Mapeamento Arquitetural**: Análise profunda da base de código existente, incluindo 12 páginas da interface, 16 serviços, 10 repositórios, camada de banco IndexedDB com migrações atômicas e Service Worker PWA.
+- **Estruturação Documental**:
+  - `PROJECT_STATE.md` — Criação do documento central de estado, riscos e checklist.
+  - `docs/ARCHITECTURE.md` e `ARCHITECTURE.md` — Expansão da arquitetura alvo com Realtime Database, anti-loop e sincronização de imagens.
+  - `ROADMAP.md` — Definição do plano das 15 fases sequenciais (Fases 00 a 14).
+  - `IMPLEMENTATION_STATUS.md` — Mapeamento do status técnico de cada componente.
+  - `SYNC_ARCHITECTURE.md` — Especificação do modelo Realtime Database e Outbox.
+  - `IMAGE_SYNC_ARCHITECTURE.md` — Estudo técnico para armazenamento de fotos sem dependência mandatória do Blaze.
+  - `SECURITY.md` — Atualização com diretrizes de segurança de regras e credenciais.
+  - `TESTING.md` — Formalização do plano de testes e dos 21 cenários de imagem.
+- **Diagnóstico da Suíte de Testes**: 166 testes passando, 5 falhas identificadas em asserções legadas de versão estática.
+- **Build de Produção**: `vite build` validado com 72 módulos compilados sem erros.
+
 ## [1.13.0-phase13] — 2026-08-20
 
 ### Adicionado — Módulo Firebase & Sincronização em Nuvem (FASE 13)

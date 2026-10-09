@@ -7,6 +7,8 @@ import { MoneyService } from '../domain/MoneyService.js';
 import { MarginService } from '../domain/MarginService.js';
 import { renderMovementTypeBadge } from '../utils/translations.js';
 import { eventBus, EVENTS } from '../eventBus.js';
+import { imageSyncService } from '../services/ImageSyncService.js';
+import { ProductImageGallery } from '../components/ProductImageGallery.js';
 
 export class ProductDetailPage {
   constructor(rootElement, productId) {
@@ -14,6 +16,7 @@ export class ProductDetailPage {
     this.productId = productId;
     this.product = null;
     this.images = [];
+    this.gallery = null;
     this.selectedImageIndex = 0;
     this.imageUrls = [];
     this.recentMovements = [];
@@ -90,6 +93,11 @@ export class ProductDetailPage {
       this.selectedImageIndex = primaryIdx !== -1 ? primaryIdx : 0;
 
       this.renderContent();
+
+      // Sincronização sob demanda de fotos do produto em foco (PHASE 07 — P1)
+      if (this.productId) {
+        imageSyncService.ensureProductImages(this.productId).catch(() => {});
+      }
     } catch (e) {
       console.error('Erro ao carregar detalhes do produto:', e);
       this.rootElement.innerHTML = `<div class="p-6 text-red-600 bg-red-50 rounded-lg">Erro ao carregar detalhes: ${e.message}</div>`;
@@ -169,28 +177,7 @@ export class ProductDetailPage {
           
           <!-- Left Column: Image Gallery (5 cols) -->
           <div class="lg:col-span-5 space-y-4">
-            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <!-- Main Large Image -->
-              <div class="relative w-full aspect-square bg-slate-100 rounded-lg overflow-hidden flex items-center justify-center border border-slate-100 group">
-                ${selectedImgUrl 
-                  ? `<img id="main-preview-img" src="${selectedImgUrl}" alt="${this._esc(p.name)}" class="w-full h-full object-contain p-2 transition-transform duration-300">`
-                  : `<div class="text-center text-slate-400">
-                      <svg class="w-16 h-16 mx-auto mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                      <span class="text-sm font-medium">Sem imagem cadastrada</span>
-                    </div>`}
-              </div>
-
-              <!-- Thumbnails Selector -->
-              ${this.imageUrls.length > 1 ? `
-                <div class="flex gap-2 mt-3 overflow-x-auto pb-1" id="thumb-strip">
-                  ${this.imageUrls.map((img, idx) => `
-                    <button data-index="${idx}" class="thumb-btn flex-shrink-0 w-16 h-16 rounded-lg border-2 overflow-hidden transition ${idx === this.selectedImageIndex ? 'border-blue-600 ring-2 ring-blue-100' : 'border-slate-200 hover:border-slate-400'}">
-                      <img src="${img.url}" class="w-full h-full object-cover" alt="Thumbnail ${idx + 1}">
-                    </button>
-                  `).join('')}
-                </div>
-              ` : ''}
-            </div>
+            <div id="product-gallery-container"></div>
 
             <!-- Commercial Summary Cards (Vendas & Compras) -->
             <div class="grid grid-cols-2 gap-3">
@@ -392,6 +379,17 @@ export class ProductDetailPage {
       </div>
     `;
 
+    // Montagem da Galeria Profissional de Fotos (PHASE 08)
+    const galleryContainer = this.rootElement.querySelector('#product-gallery-container');
+    if (galleryContainer) {
+      if (this.gallery) this.gallery.destroy();
+      this.gallery = new ProductImageGallery(galleryContainer, this.productId, {
+        productName: this.product.name,
+        tenantId: this.product.tenantId
+      });
+      this.gallery.init().catch(err => console.error('[ProductDetailPage] Erro na galeria:', err));
+    }
+
     this._bindDetailInteractions();
   }
 
@@ -528,7 +526,38 @@ export class ProductDetailPage {
       }
     });
 
-    this.cleanupListeners.push(unsubUpdate, unsubStock, unsubSale, unsubPurchase, unsubDelete);
+    const unsubImage = eventBus.on(EVENTS.IMAGE_DOWNLOADED, async (data) => {
+      if (data && data.productId === this.productId) {
+        await this._refreshImagesOnly();
+      }
+    });
+
+    this.cleanupListeners.push(unsubUpdate, unsubStock, unsubSale, unsubPurchase, unsubDelete, unsubImage);
+  }
+
+  async _refreshImagesOnly() {
+    try {
+      const data = await ProductService.getProductWithImages(this.productId);
+      if (data && data.images && data.images.length > 0) {
+        this._revokeImageUrls();
+        this.images = data.images;
+        this.imageUrls = this.images.map(img => ({
+          id: img.id,
+          isPrimary: img.isPrimary,
+          url: URL.createObjectURL(img.blob || img.thumbnailBlob)
+        }));
+        const primaryIdx = this.imageUrls.findIndex(img => img.isPrimary);
+        this.selectedImageIndex = primaryIdx !== -1 ? primaryIdx : 0;
+
+        const mainImg = this.rootElement.querySelector('#main-preview-img');
+        const selectedUrl = this.imageUrls[this.selectedImageIndex]?.url;
+        if (mainImg && selectedUrl) {
+          mainImg.src = selectedUrl;
+        } else {
+          this.renderContent();
+        }
+      }
+    } catch (_) {}
   }
 
   _revokeImageUrls() {
@@ -545,6 +574,10 @@ export class ProductDetailPage {
   }
 
   destroy() {
+    if (this.gallery) {
+      this.gallery.destroy();
+      this.gallery = null;
+    }
     this._revokeImageUrls();
     this.cleanupListeners.forEach(unsub => {
       if (typeof unsub === 'function') unsub();

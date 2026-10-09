@@ -21,6 +21,15 @@ yarn-error.log*
 .env
 .env.*
 !.env.example
+!.env.staging.example
+
+# Firebase Admin & Service Account credentials (CRITICAL - NEVER COMMIT)
+serviceAccountKey*.json
+firebase-adminsdk*.json
+*private-key*.json
+*client-secret*.json
+*.pem
+*.key
 
 # local databases, dumps and backups (never commit real business data)
 *.bak

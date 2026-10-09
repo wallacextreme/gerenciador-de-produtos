@@ -1,9 +1,17 @@
 import { eventBus, EVENTS } from '../eventBus.js';
+import { platform } from '../platform/platform.js';
 
 /**
- * GestãoPro — PWA Handler (FASE 11)
- * Gerencia o ciclo de vida do Service Worker, instalação PWA (beforeinstallprompt),
- * detecção de conectividade (online/offline) e feedback não-intrusivo de atualizações.
+ * GestãoPro — PWA Handler (PHASE 10 - PWA Hardening)
+ * 
+ * Gerencia com segurança operacional:
+ *   - Ciclo de vida do Service Worker (registro, ativação e detecção de versões)
+ *   - Atualizações seguras (safe update flow, preservação de formulários ativos)
+ *   - Instalação PWA (beforeinstallprompt, modo standalone)
+ *   - Deduplicação de eventos de conectividade (debounce em flutuações de rede)
+ *   - Throttling de eventos de primeiro plano (visibilitychange e foco)
+ *   - Separação estrita de plataformas (Tauri vs PWA Web)
+ *   - Recuperação de cache corrompido e consulta de cota
  */
 export class PWAHandler {
   constructor() {
@@ -15,16 +23,26 @@ export class PWAHandler {
       : true;
     this.isInstallable = false;
     this._initialized = false;
+    this._onlineDebounceTimer = null;
+    this._lastForegroundTime = 0;
+    this._foregroundThrottleMs = 4000;
   }
 
   /**
-   * Inicializa o gerenciador PWA, registra Service Worker e escuta eventos de rede e instalação.
+   * Inicializa o gerenciador PWA.
+   * Em ambiente Desktop (Tauri), o ciclo de Service Worker é ignorado para preservar o runtime nativo.
    */
   async init() {
     if (this._initialized) return;
     this._initialized = true;
 
+    // Separação Tauri: não registra SW nem intercepta prompts de instalação em Tauri Desktop
+    if (typeof platform !== 'undefined' && platform.isDesktop()) {
+      return;
+    }
+
     this._setupNetworkListeners();
+    this._setupForegroundListeners();
     this._setupInstallPromptListeners();
 
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
@@ -63,7 +81,7 @@ export class PWAHandler {
               this._notifyUpdateReady();
             } else {
               // Primeira instalação — conteúdo em cache para uso offline
-              console.log('[PWA] Conteúdo em cache para uso offline.');
+              console.log('[PWA] Conteúdo do App Shell em cache para uso offline.');
             }
           }
         });
@@ -89,7 +107,8 @@ export class PWAHandler {
    */
   _notifyUpdateReady() {
     const payload = {
-      applyUpdate: () => this.applyUpdate()
+      applyUpdate: (force = false) => this.applyUpdate(force),
+      isSafe: () => this.isSafeToUpdate()
     };
 
     if (typeof window !== 'undefined') {
@@ -102,30 +121,119 @@ export class PWAHandler {
   }
 
   /**
-   * Aplica a atualização do Service Worker (envia SKIP_WAITING).
+   * Avalia se a aplicação está em um momento seguro para recarregar/atualizar.
+   * Não interrompe digitação em formulários, modais abertos, rotas de edição/cadastro,
+   * ou estado offline.
+   * @returns {boolean}
    */
-  applyUpdate() {
-    if (this.waitingWorker) {
-      this.waitingWorker.postMessage({ type: 'SKIP_WAITING' });
-    } else if (this.swRegistration && this.swRegistration.waiting) {
-      this.swRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+  isSafeToUpdate() {
+    if (typeof document === 'undefined') return true;
+
+    // 1. Atualizações não devem ser aplicadas offline
+    if (!this.isOnline) return false;
+
+    // 2. Não atualizar se usuário estiver interagindo com campos de entrada
+    if (document.activeElement) {
+      const tag = document.activeElement.tagName ? document.activeElement.tagName.toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+        return false;
+      }
     }
+
+    // 3. Não atualizar se houver modal de formulário ou diálogo aberto
+    const hasOpenModal = !!document.querySelector('.modal:not(.hidden), [role="dialog"]:not(.hidden)');
+    if (hasOpenModal) return false;
+
+    // 4. Não atualizar se o usuário estiver em rotas de cadastro ou edição de entidades
+    if (typeof window !== 'undefined' && window.location && window.location.hash) {
+      const hash = window.location.hash;
+      if (hash.includes('/novo') || hash.includes('/editar')) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   /**
-   * Configura listeners de conectividade da rede.
+   * Aplica a atualização do Service Worker (envia SKIP_WAITING).
+   * @param {boolean} [force=false] Se true, ignora restrições de segurança de momento.
+   * @returns {boolean} Se o comando foi disparado com sucesso.
+   */
+  applyUpdate(force = false) {
+    if (!this.isOnline) {
+      console.warn('[PWA] Não é possível aplicar atualização enquanto offline.');
+      return false;
+    }
+
+    if (!force && !this.isSafeToUpdate()) {
+      console.warn('[PWA] Atualização postergada para momento seguro (usuário em operação crítica).');
+      return false;
+    }
+
+    const targetWorker = this.waitingWorker || (this.swRegistration && this.swRegistration.waiting);
+    if (targetWorker) {
+      targetWorker.postMessage({ type: 'SKIP_WAITING' });
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Configura listeners de conectividade da rede com debounce e deduplicação.
    */
   _setupNetworkListeners() {
     if (typeof window === 'undefined') return;
 
     window.addEventListener('online', () => {
-      this.isOnline = true;
-      this._handleNetworkChange(true);
+      if (this._onlineDebounceTimer) {
+        clearTimeout(this._onlineDebounceTimer);
+      }
+      this._onlineDebounceTimer = setTimeout(() => {
+        if (!this.isOnline) {
+          this.isOnline = true;
+          this._handleNetworkChange(true);
+        }
+      }, 250);
     });
 
     window.addEventListener('offline', () => {
-      this.isOnline = false;
-      this._handleNetworkChange(false);
+      if (this._onlineDebounceTimer) {
+        clearTimeout(this._onlineDebounceTimer);
+      }
+      if (this.isOnline) {
+        this.isOnline = false;
+        this._handleNetworkChange(false);
+      }
+    });
+  }
+
+  /**
+   * Configura throttle para eventos de foreground (retorno à aba / foco) para evitar rajadas.
+   */
+  _setupForegroundListeners() {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+
+    const handleForeground = () => {
+      const now = Date.now();
+      if (now - this._lastForegroundTime < this._foregroundThrottleMs) {
+        return; // Throttled
+      }
+      this._lastForegroundTime = now;
+
+      if (document.visibilityState === 'visible' && this.isOnline) {
+        window.dispatchEvent(new CustomEvent('pwa:foreground'));
+      }
+    };
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        handleForeground();
+      }
+    });
+
+    window.addEventListener('focus', () => {
+      handleForeground();
     });
   }
 
@@ -286,6 +394,55 @@ export class PWAHandler {
 
       setTimeout(() => resolve(null), 1000);
     });
+  }
+
+  /**
+   * Purga caches do App Shell para recuperação de cache corrompido.
+   * NUNCA toca no IndexedDB.
+   * @returns {Promise<boolean>}
+   */
+  async clearAppCache() {
+    if (typeof caches !== 'undefined') {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys.filter((key) => key.startsWith('gestaopro-')).map((key) => caches.delete(key))
+        );
+      } catch (err) {
+        console.warn('[PWA] Erro ao limpar caches via CacheStorage:', err);
+      }
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.serviceWorker && navigator.serviceWorker.controller) {
+      try {
+        const channel = new MessageChannel();
+        const promise = new Promise((resolve) => {
+          channel.port1.onmessage = (event) => resolve(event.data?.success || false);
+          setTimeout(() => resolve(true), 1500);
+        });
+        navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_APP_CACHE' }, [channel.port2]);
+        await promise;
+      } catch (_) {}
+    }
+    return true;
+  }
+
+  /**
+   * Obtém estimativa de cota de armazenamento via Storage API.
+   * Isola a cota do navegador sem misturar com banco de imagens.
+   */
+  async getStorageQuota() {
+    if (typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.estimate === 'function') {
+      try {
+        const est = await navigator.storage.estimate();
+        return {
+          usage: est.usage || 0,
+          quota: est.quota || (1024 * 1024 * 1024),
+          percentUsed: est.quota ? Number(((est.usage / est.quota) * 100).toFixed(2)) : 0
+        };
+      } catch (_) {}
+    }
+    return { usage: 0, quota: 1024 * 1024 * 1024, percentUsed: 0 };
   }
 }
 

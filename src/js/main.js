@@ -3,6 +3,7 @@ import { requestPersistentStorage } from './utils/storage.js';
 import { getDB } from './db/connection.js';
 import { pwaHandler } from './utils/pwa.js';
 import { syncEngine } from './services/SyncEngine.js';
+import { authService } from './services/AuthService.js';
 import { initPublicDemoIfNeeded } from './demo/demoSeed.js';
 
 // Application Entry Point
@@ -19,6 +20,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // 3. Initialize PWA & Service Worker
     await pwaHandler.init();
+
+    // 3.5 Initialize Authentication Service (PHASE 02)
+    await authService.init();
 
     // 4. Initialize Cloud Sync Engine (FASE 13)
     await syncEngine.init();

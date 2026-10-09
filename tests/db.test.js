@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { getDB, closeDB } from '../src/js/db/connection.js';
+import { DB_VERSION } from '../src/js/db/migrations.js';
 import { productRepository } from '../src/js/repositories/ProductRepository.js';
 import { executeTransaction } from '../src/js/db/transactions.js';
 
@@ -17,7 +18,7 @@ describe('IndexedDB Persistence Layer', () => {
   it('deve inicializar o banco e aplicar schema (migrations)', async () => {
     const db = await getDB();
     expect(db.name).toBe('gestaopro_db');
-    expect(db.version).toBe(1);
+    expect(db.version).toBe(DB_VERSION);
     expect(db.objectStoreNames.contains('products')).toBeTrue();
     expect(db.objectStoreNames.contains('stockMovements')).toBeTrue();
     expect(db.objectStoreNames.contains('sales')).toBeTrue();

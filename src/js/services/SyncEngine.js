@@ -32,10 +32,30 @@ export class SyncEngine {
     this._initialized = true;
 
     try {
-      // 1. Carrega configurações salvas de nuvem
-      const savedConfig = await settingsRepository.get('firebaseConfig');
-      if (savedConfig && this.provider instanceof FirebaseProvider) {
-        this.provider.updateConfig(savedConfig);
+      // 1. Carrega configurações salvas de nuvem ou fallback de ambiente
+      let savedConfig = await settingsRepository.get('firebaseConfig');
+      if ((!savedConfig || !savedConfig.apiKey) && typeof import.meta !== 'undefined' && import.meta.env) {
+        const env = import.meta.env;
+        if (env.VITE_FIREBASE_API_KEY && env.VITE_FIREBASE_PROJECT_ID) {
+          savedConfig = {
+            apiKey: env.VITE_FIREBASE_API_KEY,
+            authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
+            projectId: env.VITE_FIREBASE_PROJECT_ID,
+            storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET,
+            messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+            appId: env.VITE_FIREBASE_APP_ID,
+            databaseURL: env.VITE_FIREBASE_DATABASE_URL,
+            emulatorHost: env.VITE_FIREBASE_EMULATOR_HOST
+          };
+        }
+      }
+
+      if (savedConfig) {
+        if (this.provider instanceof FirebaseProvider) {
+          this.provider.updateConfig(savedConfig);
+        } else if (this.provider && typeof this.provider.initialize === 'function') {
+          await this.provider.initialize(savedConfig);
+        }
       }
 
       const savedAutoSync = await settingsRepository.get('autoSyncEnabled');
@@ -98,11 +118,14 @@ export class SyncEngine {
 
   /**
    * Registra listeners para eventos de mutação de entidades.
+   * Anti-Loop: Mutações com origin: 'remote' são ignoradas para não reentrar no Outbox.
    */
   _setupMutationListeners() {
+    const isRemote = (payload) => payload && (payload.origin === 'remote' || payload._origin === 'remote');
+
     // Produtos (Create/Update)
     const unsubProdUp = eventBus.on(EVENTS.PRODUCT_UPDATED, async (payload) => {
-      if (payload && payload.id) {
+      if (payload && payload.id && !isRemote(payload)) {
         await this.enqueue('products', payload.id, 'UPDATE', payload);
       }
     });
@@ -110,7 +133,7 @@ export class SyncEngine {
 
     // Produtos (Soft Delete)
     const unsubProdDel = eventBus.on(EVENTS.PRODUCT_DELETED, async (payload) => {
-      if (payload && payload.id) {
+      if (payload && payload.id && !isRemote(payload)) {
         await this.enqueue('products', payload.id, 'DELETE', payload);
       }
     });
@@ -118,7 +141,7 @@ export class SyncEngine {
 
     // Movimentações de Estoque
     const unsubStock = eventBus.on(EVENTS.STOCK_CHANGED, async (payload) => {
-      if (payload && payload.id) {
+      if (payload && payload.id && !isRemote(payload)) {
         await this.enqueue('stockMovements', payload.id, 'CREATE', payload);
       }
     });
@@ -126,7 +149,7 @@ export class SyncEngine {
 
     // Vendas
     const unsubSale = eventBus.on(EVENTS.SALE_CREATED, async (payload) => {
-      if (payload && payload.id) {
+      if (payload && payload.id && !isRemote(payload)) {
         await this.enqueue('sales', payload.id, 'CREATE', payload);
       }
     });
@@ -134,7 +157,7 @@ export class SyncEngine {
 
     // Compras
     const unsubPurchase = eventBus.on(EVENTS.PURCHASE_CREATED, async (payload) => {
-      if (payload && payload.id) {
+      if (payload && payload.id && !isRemote(payload)) {
         await this.enqueue('purchases', payload.id, 'CREATE', payload);
       }
     });
@@ -142,7 +165,7 @@ export class SyncEngine {
 
     // Configurações
     const unsubSettings = eventBus.on(EVENTS.SETTINGS_CHANGED, async (payload) => {
-      if (payload && payload.key && payload.key !== 'firebaseConfig') {
+      if (payload && payload.key && payload.key !== 'firebaseConfig' && !isRemote(payload)) {
         await this.enqueue('settings', payload.key, 'UPDATE', payload);
       }
     });

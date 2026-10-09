@@ -652,24 +652,39 @@ export class ReportService {
   }
 
   /**
+   * Sanitiza strings para interpolação segura em documentos HTML de impressão (Anti-XSS).
+   */
+  static _escapeHTML(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
    * Monta o documento formal HTML com cabeçalho da empresa para impressão (@media print / PDF).
    */
   static generatePrintableHTML(reportData, companyProfile = null) {
     const cp = companyProfile || {};
-    const emittedAt = new Date().toLocaleString('pt-BR');
+    const esc = this._escapeHTML.bind(this);
+    const emittedAt = esc(new Date().toLocaleString('pt-BR'));
 
+    const tradeTitle = esc(cp.tradeName || cp.corporateName || 'GestãoPro — Sistema Comercial');
     const headerHTML = `
       <div class="print-header">
         <div class="company-info">
-          <h2>${cp.tradeName || cp.corporateName || 'GestãoPro — Sistema Comercial'}</h2>
-          ${cp.cnpj ? `<p><strong>CNPJ/CPF:</strong> ${cp.cnpj}</p>` : ''}
-          ${cp.phone ? `<p><strong>Telefone:</strong> ${cp.phone}</p>` : ''}
-          ${cp.email ? `<p><strong>Email:</strong> ${cp.email}</p>` : ''}
-          ${cp.address ? `<p><strong>Endereço:</strong> ${cp.address}</p>` : ''}
+          <h2>${tradeTitle}</h2>
+          ${cp.cnpj ? `<p><strong>CNPJ/CPF:</strong> ${esc(cp.cnpj)}</p>` : ''}
+          ${cp.phone ? `<p><strong>Telefone:</strong> ${esc(cp.phone)}</p>` : ''}
+          ${cp.email ? `<p><strong>Email:</strong> ${esc(cp.email)}</p>` : ''}
+          ${cp.address ? `<p><strong>Endereço:</strong> ${esc(cp.address)}</p>` : ''}
         </div>
         <div class="report-meta">
-          <h1>${reportData.title}</h1>
-          ${reportData.period ? `<p><strong>Período:</strong> ${reportData.period.label}</p>` : ''}
+          <h1>${esc(reportData.title)}</h1>
+          ${reportData.period ? `<p><strong>Período:</strong> ${esc(reportData.period.label)}</p>` : ''}
           <p><strong>Emissão:</strong> ${emittedAt}</p>
         </div>
       </div>
@@ -679,13 +694,13 @@ export class ReportService {
       <table class="print-table">
         <thead>
           <tr>
-            ${reportData.columns.map(c => `<th>${c.label}</th>`).join('')}
+            ${(reportData.columns || []).map(c => `<th>${esc(c.label)}</th>`).join('')}
           </tr>
         </thead>
         <tbody>
-          ${reportData.rows.map(row => `
+          ${(reportData.rows || []).map(row => `
             <tr>
-              ${reportData.columns.map(col => `<td>${row[col.key] !== undefined && row[col.key] !== null ? row[col.key] : ''}</td>`).join('')}
+              ${(reportData.columns || []).map(col => `<td>${row[col.key] !== undefined && row[col.key] !== null ? esc(row[col.key]) : ''}</td>`).join('')}
             </tr>
           `).join('')}
         </tbody>
@@ -697,7 +712,7 @@ export class ReportService {
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8" />
-        <title>${reportData.title} — GestãoPro</title>
+        <title>${esc(reportData.title)} — GestãoPro</title>
         <style>
           @page { size: A4 portrait; margin: 15mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #1e293b; font-size: 11px; margin: 0; padding: 20px; }
