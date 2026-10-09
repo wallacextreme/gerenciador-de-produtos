@@ -12,6 +12,7 @@
     "tauri:build": "tauri build"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.11.4",
     "autoprefixer": "^10.5.4",

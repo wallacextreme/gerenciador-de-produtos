@@ -2,13 +2,13 @@
   "rules": {
     "tenants": {
       "$tenantId": {
-        ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+        ".read": "auth != null && ((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId))",
 
         "products": {
           ".indexOn": ["productCode", "barcode", "updatedAt", "category"],
           "$productId": {
-            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
-            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || auth.token.role === 'operator' || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+            ".read": "auth != null && ((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId))",
+            ".write": "auth != null && (((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) && (auth.token.role === 'admin' || auth.token.role === 'operator')) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'operator')))",
             ".validate": "newData.hasChildren(['id', 'name', 'salePriceCents']) && (!newData.hasChild('salePriceCents') || newData.child('salePriceCents').isNumber()) && (!newData.hasChild('version') || newData.child('version').isNumber())"
           }
         },
@@ -16,17 +16,77 @@
         "inventory": {
           ".indexOn": ["productId", "type", "date"],
           "$movementId": {
-            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
-            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
-            ".validate": "newData.hasChildren(['id', 'productId', 'quantity', 'delta', 'type']) && newData.child('quantity').isNumber()"
+            ".read": "auth != null && ((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId))",
+            ".write": "auth != null && (((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) && (auth.token.role === 'admin' || auth.token.role === 'operator')) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'operator'))) && !data.exists() && newData.exists()",
+            ".validate": "newData.hasChildren(['id', 'productId', 'quantity', 'delta', 'type']) && (((newData.child('type').val() === 'IN' || newData.child('type').val() === 'PURCHASE' || newData.child('type').val() === 'RETURN') && newData.child('delta').val() === newData.child('quantity').val()) || ((newData.child('type').val() === 'OUT' || newData.child('type').val() === 'SALE') && newData.child('delta').val() === -newData.child('quantity').val()) || (newData.child('type').val() === 'ADJUSTMENT' && newData.child('delta').val() !== 0 && (newData.child('delta').val() === newData.child('quantity').val() || newData.child('delta').val() === -newData.child('quantity').val())))",
+            "id": {
+              ".validate": "newData.isString() && newData.val() === $movementId"
+            },
+            "productId": {
+              ".validate": "newData.isString() && newData.val().length > 0"
+            },
+            "quantity": {
+              ".validate": "newData.isNumber() && newData.val() > 0"
+            },
+            "delta": {
+              ".validate": "newData.isNumber()"
+            },
+            "type": {
+              ".validate": "newData.val() === 'IN' || newData.val() === 'OUT' || newData.val() === 'ADJUSTMENT' || newData.val() === 'RETURN' || newData.val() === 'PURCHASE' || newData.val() === 'SALE'"
+            },
+            "unitCostCents": {
+              ".validate": "newData.isNumber() && newData.val() >= 0"
+            },
+            "reason": {
+              ".validate": "newData.isString()"
+            },
+            "notes": {
+              ".validate": "newData.isString()"
+            },
+            "referenceId": {
+              ".validate": "newData.isString()"
+            },
+            "referenceType": {
+              ".validate": "newData.isString()"
+            },
+            "previousStock": {
+              ".validate": "newData.isNumber()"
+            },
+            "resultingStock": {
+              ".validate": "newData.isNumber()"
+            },
+            "date": {
+              ".validate": "newData.isString()"
+            },
+            "createdAt": {
+              ".validate": "newData.isString()"
+            },
+            "sourceDeviceId": {
+              ".validate": "newData.isString()"
+            },
+            "lastMutationId": {
+              ".validate": "newData.isString()"
+            },
+            "updatedAt": {
+              ".validate": "newData.isString()"
+            },
+            "version": {
+              ".validate": "newData.isNumber() && newData.val() >= 1"
+            },
+            "_serverTimestamp": {
+              ".validate": "newData.isNumber()"
+            },
+            "$other": {
+              ".validate": false
+            }
           }
         },
 
         "sales": {
           ".indexOn": ["productId", "date", "createdAt"],
           "$saleId": {
-            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
-            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
+            ".read": "auth != null && ((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId))",
+            ".write": "auth != null && (((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) && (auth.token.role === 'admin' || auth.token.role === 'operator')) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'operator')))",
             ".validate": "newData.hasChildren(['id', 'productId', 'quantity', 'totalSaleCents']) && newData.child('totalSaleCents').isNumber()"
           }
         },
@@ -34,8 +94,8 @@
         "purchases": {
           ".indexOn": ["date", "createdAt"],
           "$purchaseId": {
-            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
-            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+            ".read": "auth != null && ((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId))",
+            ".write": "auth != null && (((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) && auth.token.role === 'admin') || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId && root.child('users').child(auth.uid).child('role').val() === 'admin'))",
             ".validate": "newData.hasChildren(['id', 'totalAmountCents'])"
           }
         },
@@ -43,46 +103,46 @@
         "suppliers": {
           ".indexOn": ["name", "document"],
           "$supplierId": {
-            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
-            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+            ".read": "auth != null && ((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId))",
+            ".write": "auth != null && (((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) && auth.token.role === 'admin') || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId && root.child('users').child(auth.uid).child('role').val() === 'admin'))"
           }
         },
 
         "productSuppliers": {
           ".indexOn": ["productId", "supplierId"],
           "$productSupplierId": {
-            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
-            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+            ".read": "auth != null && ((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId))",
+            ".write": "auth != null && (((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) && auth.token.role === 'admin') || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId && root.child('users').child(auth.uid).child('role').val() === 'admin'))"
           }
         },
 
         "settings": {
           "$settingKey": {
-            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
-            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+            ".read": "auth != null && ((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId))",
+            ".write": "auth != null && (((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) && auth.token.role === 'admin') || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId && root.child('users').child(auth.uid).child('role').val() === 'admin'))"
           }
         },
 
         "imageManifest": {
           ".indexOn": ["productId", "version", "updatedAt"],
           "$photoId": {
-            ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
-            ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId) && (auth.token.role === 'admin' || auth.token.role === 'operator' || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+            ".read": "auth != null && ((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId))",
+            ".write": "auth != null && (((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) && (auth.token.role === 'admin' || auth.token.role === 'operator')) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'operator')))",
             ".validate": "newData.hasChildren(['id', 'productId', 'url', 'version'])"
           }
         },
 
         "syncMetadata": {
-          ".read": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)",
-          ".write": "auth != null && (auth.token.tenantId === $tenantId || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)"
+          ".read": "auth != null && ((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId))",
+          ".write": "auth != null && (((auth.token.tenantId === $tenantId && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === $tenantId)) && (auth.token.role === 'admin' || auth.token.role === 'operator')) || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === $tenantId && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'operator')))"
         }
       }
     },
 
     "users": {
       "$uid": {
-        ".read": "auth != null && (auth.uid === $uid || auth.token.role === 'admin')",
-        ".write": "auth != null && (auth.token.role === 'admin' || (auth.uid === $uid && !data.exists() && !newData.hasChild('role') && !newData.hasChild('tenantId')) || (auth.uid === $uid && data.exists() && (!newData.hasChild('role') || newData.child('role').val() === data.child('role').val()) && (!newData.hasChild('tenantId') || newData.child('tenantId').val() === data.child('tenantId').val())))"
+        ".read": "auth != null && (auth.uid === $uid || (auth.token.tenantId != null && auth.token.tenantId === data.child('tenantId').val() && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === data.child('tenantId').val()) && auth.token.role === 'admin') || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === data.child('tenantId').val() && root.child('users').child(auth.uid).child('role').val() === 'admin'))",
+        ".write": "auth != null && ((!data.exists() && ((auth.token.tenantId != null && auth.token.tenantId === newData.child('tenantId').val() && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === newData.child('tenantId').val()) && auth.token.role === 'admin') || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === newData.child('tenantId').val() && root.child('users').child(auth.uid).child('role').val() === 'admin'))) || (data.exists() && (!newData.exists() || newData.child('tenantId').val() === data.child('tenantId').val()) && ((auth.token.tenantId != null && auth.token.tenantId === data.child('tenantId').val() && (!root.child('users').child(auth.uid).exists() || !root.child('users').child(auth.uid).hasChild('tenantId') || root.child('users').child(auth.uid).child('tenantId').val() === data.child('tenantId').val()) && auth.token.role === 'admin') || (auth.token.tenantId == null && root.child('users').child(auth.uid).child('tenantId').val() === data.child('tenantId').val() && root.child('users').child(auth.uid).child('role').val() === 'admin'))) || (auth.uid === $uid && !data.exists() && !newData.hasChild('role') && !newData.hasChild('tenantId')) || (auth.uid === $uid && data.exists() && newData.exists() && ((!data.hasChild('role') && !newData.hasChild('role')) || (data.hasChild('role') && newData.child('role').val() === data.child('role').val())) && ((!data.hasChild('tenantId') && !newData.hasChild('tenantId')) || (data.hasChild('tenantId') && newData.child('tenantId').val() === data.child('tenantId').val()))))"
       }
     }
   }
