@@ -609,3 +609,306 @@ Validação ponta a ponta executada diretamente no navegador **Google Chrome** a
 
 ### D. Classificação da Fase 13.10
 **Resultado:** `BROWSER_EMULATOR_E2E_PASS` (com Storage Emulator classificado como `NOT VERIFIED` e Firebase Cloud staging classificado como `NOT HOMOLOGATED`).
+
+---
+
+## 14. EVIDÊNCIAS DA FASE 13.13 — INSTALAÇÃO PARALELA DO JDK 21 E VALIDAÇÃO DO STORAGE EMULATOR
+
+### A. Contexto e Resolução do Ambiente Java
+Para atender ao requisito da Firebase CLI (`firebase-tools`) de execução do Storage Emulator, foi realizada a instalação paralela do **Eclipse Temurin JDK 21 LTS** (`EclipseAdoptium.Temurin.21.JDK`, versão `21.0.12.101`) via `winget` oficial, preservando integralmente a instalação preexistente do Java 8 (`jre1.8.0_471`).
+* **Preservação do Java 8:** Verificada a integridade de `C:\Program Files\Java\jre1.8.0_471\bin\java.exe` e `C:\Program Files (x86)\Common Files\Oracle\Java\java8path\java.exe` (`java version "1.8.0_471"`).
+* **Configuração da Sessão:** O JDK 21 foi mapeado para a sessão em `C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot` com `javac 21.0.12.1` e `openjdk version "21.0.12.1"`.
+
+### B. Inicialização do Firebase Storage Emulator
+* **Projeto Empregado:** `demo-gerenciador-produtos-staging` (modo estritamente demonstrativo e local).
+* **Comando Executado:** `firebase emulators:start --only storage,auth --project demo-gerenciador-produtos-staging`.
+* **Portas Escutadas Localmente:**
+  - Storage Emulator: `127.0.0.1:9199` (LISTEN, processo filho `java.exe` executando o runtime `cloud-storage-rules-runtime-v1.1.3.jar` com Java 21).
+  - Authentication Emulator: `127.0.0.1:9099` (LISTEN).
+  - Emulator UI: `127.0.0.1:4000` (LISTEN).
+* **Ausência de Tráfego Remoto:** Detecção automática do prefixo `demo-` pela Firebase CLI com bloqueio de qualquer chamada a serviços de produção.
+
+### C. Execução de Testes Funcionais e Regras de Segurança
+Foram executadas 9 asserções funcionais e de segurança auditando as regras reais declaradas em `storage.rules`:
+1. **Acesso Não Autenticado:** Leitura e escrita não autenticadas foram sumariamente rejeitadas (`storage/unauthorized`). ✅ PASS
+2. **Isolamento Cross-Tenant:** Usuário com token emitido para `tenant_beta` tentando ler ou gravar em `tenants/tenant_alpha/...` foi bloqueado (`storage/unauthorized`). ✅ PASS
+3. **Restrição por Papel (Role):** Usuário do mesmo tenant com perfil `viewer` teve gravação rejeitada, pois as regras exigem papel `admin` ou `operator`. ✅ PASS
+4. **Restrição por Tipo MIME:** Tentativas de upload de arquivos `text/plain` e `application/pdf` foram bloqueadas (apenas imagens raster `image/jpeg`, `image/png`, `image/webp` permitidas). ✅ PASS
+5. **Restrição de Tamanho Máximo:** Tentativa de upload simulado de arquivo excedendo o teto de 10MB foi rejeitada pelas regras declarativas. ✅ PASS
+6. **Upload Autorizado de Imagem Sintética:** Usuário com papel `admin` de `tenant_alpha` efetuou upload de imagem sintética WebP com sucesso. ✅ PASS
+7. **Download e Integridade dos Bytes:** O arquivo sintético foi recuperado do emulador, e o hash/conteúdo dos bytes foi verificado com 100% de integridade em relação ao original. ✅ PASS
+8. **Leitura Autorizada por Operador:** Usuário com papel `operator` de `tenant_alpha` recuperou o arquivo com sucesso. ✅ PASS
+9. **Exclusão Autorizada e Validação Pós-Exclusão:** Exclusão autorizada foi confirmada, e tentativa de leitura subsequente retornou erro esperado de `storage/object-not-found`. ✅ PASS
+
+### D. Auditoria e Reconciliação do Provedor da Aplicação (Fase 13.14)
+* **Investigação da Rejeição Inicial (`storage/unauthorized`):** Na Fase 13.13, o script temporário de teste utilizou um mock raso de `authService` sem instanciar uma sessão de autenticação nativa no Firebase Auth SDK. Sem usuário autenticado no container do Firebase App (`request.auth == null`), o emulador rejeitou corretamente o upload em conformidade com as regras de segurança. Adicionalmente, a execução fora da raiz do workspace gerou instâncias de módulo isoladas do Firebase SDK.
+* **Validação Reconciliada com Sessão Autenticada e Claims:** Ao instanciar o `FirebaseStorageProvider` no contexto do workspace com uma identidade sintética devidamente autenticada no Authentication Emulator via `signInWithEmailAndPassword` e com custom claims confirmadas no token (`tenantId: 'tenant_staging_01'`, `role: 'operator'`), todas as operações foram concluídas com sucesso:
+  1. **Upload via Provider:** Imagem sintética WebP gravada em `tenants/tenant_staging_01/products/prod_integration_01/photo_integration_01.webp` com URL apontando para `127.0.0.1:9199`. ✅ PASS
+  2. **Verificação de Existência (`provider.exists`):** Retornou `true`. ✅ PASS
+  3. **Download e Integridade (`provider.download`):** Objeto baixado em stream binário com 100% de coincidência byte-a-byte com o original. ✅ PASS
+  4. **Exclusão via Provider (`provider.delete`):** Objeto excluído com sucesso. ✅ PASS
+  5. **Confirmação Pós-Exclusão:** `provider.exists()` retornou `false`. ✅ PASS
+  6. **Controles Negativos pelo Provider:** Tentativa de upload em tenant divergente foi bloqueada com erro de segurança; upload de arquivo `.pdf` foi rejeitado por tipo de arquivo inválido; upload acima de 10MB foi rejeitado por limite de tamanho; e upload após `signOut` foi sumariamente bloqueado. ✅ PASS
+
+### E. Suíte de Regressão e Compilação
+* `bun test`: 594 testes aprovados (0 falhas) em 26 arquivos de teste.
+* `bun run build`: compilação de produção Vite v8.2.1 concluída com sucesso (94 módulos transformados em 986ms).
+
+### F. Classificação Final Consolidada (Fases 13.13 e 13.14)
+* `JDK21_READY`: Ambiente com OpenJDK 21 LTS e compilador javac instalado e operacional.
+* `STORAGE_EMULATOR_STARTUP_PASS`: Emulador de Storage iniciado na porta 9199 sob o projeto `demo-gerenciador-produtos-staging`.
+* `STORAGE_RULES_VALIDATION_PASS`: As regras de `storage.rules` foram exaustivamente validadas para cenários permitidos e negados.
+* `STORAGE_FUNCTIONAL_TESTS_PASS`: Upload, download, integridade binária e deleção validados contra o emulador local.
+* `STORAGE_PROVIDER_INTEGRATION_PASS`: O `FirebaseStorageProvider` real da aplicação executou com êxito todas as operações autenticadas e tratou todas as negações de segurança.
+* `REGRESSION_SUITE_PASS`: Suíte de 594 testes e compilação mantidas íntegras sem regressões.
+* **Firebase Cloud Staging:** Mantido como `NOT HOMOLOGATED` até homologação real na nuvem ser autorizada e executada.
+
+---
+
+## 15. EVIDÊNCIAS DA FASE 13.15 — TESTES PERMANENTES DE INTEGRAÇÃO COM STORAGE EMULATOR
+
+### A. Objetivo e Estrutura Permanente Criada
+Consolidação dos testes de integração entre o Firebase Authentication Emulator (`127.0.0.1:9099`), o Firebase Storage Emulator (`127.0.0.1:9199`), o provedor real `FirebaseStorageProvider` e as regras `storage.rules` em uma suíte permanente, reprodutível e totalmente isolada da suíte comum.
+
+#### Arquivos Permanentes Criados / Alterados:
+1. `tests/storage_emulator.integration.js`:
+   - Suíte de integração oficial com 10 asserções executadas diretamente via SDK cliente `firebase/app`, `firebase/auth`, `firebase/storage` e `FirebaseStorageProvider`.
+   - Nomeado intencionalmente com `.integration.js` para não ser descoberto pelo glob padrão de `bun test` (`*.test.{js,ts}`), mantendo a suíte comum leve e independente de emuladores ativos.
+2. `scripts/test-storage-emulator.js`:
+   - Orquestrador multiplataforma responsável por:
+     - Detectar e injetar o ambiente OpenJDK 21 LTS (`C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot`) na sessão de subprocessos, preservando a instalação do Java 8 global do Windows.
+     - Verificar via socket TCP (`node:net`) se os emuladores já estão ativos nas portas 9099 e 9199 (reutilizando-os se já disponíveis).
+     - Iniciar sob demanda o Firebase Emulator Suite restrito a `storage,auth` no projeto `demo-gerenciador-produtos-staging`.
+     - Aguardar prontidão completa do cluster local com polling e verificação de logs ("All emulators ready").
+     - Executar a suíte de testes de integração via `bun test ./tests/storage_emulator.integration.js`.
+     - Executar encerramento dos emuladores caso tenham sido iniciados pelo próprio script (inicialmente via encerramento forçado `taskkill /pid ... /T /F` no Windows, posteriormente corrigido e substituído a partir da Fase 13.16 pelo ciclo de vida nativo e gracioso do `firebase emulators:exec`), preservando emuladores preexistentes.
+     - Retornar código de saída diferente de zero em caso de qualquer falha.
+3. `package.json`:
+   - Adição do comando permanente `"test:storage-emulator": "bun scripts/test-storage-emulator.js"`.
+
+---
+
+### B. Comando Oficial de Integração
+```bash
+bun run test:storage-emulator
+```
+
+---
+
+### C. Requisitos do Ambiente e Isolamento Fail-Closed
+* **Ambiente Java:** Requer OpenJDK 21 LTS (`C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot`), injetado estritamente nas variáveis `JAVA_HOME` e `PATH` do subprocesso do emulador, preservando o Java 8 (`jre1.8.0_471`) do sistema operacional.
+* **Ferramenta de Emulação:** `firebase-tools` v15.26.0 executada localmente via `npx.cmd`.
+* **Identificador de Projeto:** `demo-gerenciador-produtos-staging` (estritamente demonstrativo, ativando as salvaguardas offline do Firebase SDK).
+* **Bloqueio Absoluto de Nuvem:** O validador `src/js/utils/firebaseConfigValidator.js` proíbe conexões a projetos sem o prefixo `demo-` e sem hosts locais explícitos no modo de emulação. Nenhum recurso na nuvem real é acessado ou provisionado.
+
+---
+
+### D. Operações Testadas e Verificações de Autorização
+
+#### 1. Inicialização e Sessão Autenticada (C.1 & C.2)
+- Validação da configuração do provedor (`provider.isConfigured() === true`, `provider.getTenantId() === 'tenant_staging_01'`).
+- Confirmação de que o `FirebaseStorageProvider` compartilha a mesma instância do Firebase App onde o usuário foi autenticado via `signInWithEmailAndPassword`.
+- Validação no ID Token do cliente das custom claims provisionadas via endpoint de administração do emulador (`tenantId: 'tenant_staging_01'`, `role: 'operator'`, `aud: 'demo-gerenciador-produtos-staging'`). ✅ PASS
+
+#### 2. Upload Sintético e Integridade Binária Byte-a-Byte (C.3)
+- Upload de payload sintético de imagem WebP (32 bytes) para o caminho `tenants/tenant_staging_01/products/prod_perm_01/photo_perm_01.webp`.
+- Confirmação do caminho remoto retornado, URL apontando para `127.0.0.1:9199`, tamanho em bytes e MIME type `image/webp`.
+- Verificação de existência com `provider.exists()` (retornando `true`).
+- Leitura de metadados remotos com `provider.getMetadata()`.
+- Download do arquivo remoto via `provider.download()` com conversão para `ArrayBuffer` e validação estrita byte-a-byte contra os bytes originais via `Buffer.equals()` (100% de integridade confirmada). ✅ PASS
+
+#### 3. Exclusão e Validação de Ausência (C.4)
+- Exclusão do objeto sintético via `provider.delete()`.
+- Confirmação de ausência do objeto remoto via `provider.exists()` (retornando `false`).
+- Tentativa de download do objeto excluído rejeitada com erro esperado `NOT_FOUND`. ✅ PASS
+
+#### 4. Cenários Negativos e Barreiras de Segurança (D.1 a D.6)
+- **D.1 — Rejeição de Upload Cross-Tenant no Emulador:** Provedor tentando upload com `tenantId: 'tenant_other_99'` alcança o Storage Emulator e é sumariamente rejeitado pelas regras `storage.rules` com `storage/unauthorized`. ✅ PASS
+- **D.1b — Rejeição Antecipada Cross-Tenant no Provedor:** Provedor rejeita antecipadamente tentativa de deleção/leitura com caminho pertencente a outro tenant (`Acesso cross-tenant negado`). ✅ PASS
+- **D.2 — Rejeição Antecipada de MIME Proibido:** Provedor rejeita antecipadamente upload de arquivo `application/pdf` (`Tipo de arquivo não permitido`). ✅ PASS
+- **D.3 — Rejeição Antecipada de Arquivo Acima de 10MB:** Provedor rejeita antecipadamente upload de arquivo de 11MB (`Arquivo excede o limite máximo`). ✅ PASS
+- **D.4 — Rejeição Direta Cross-Tenant pelas Regras:** Tentativa direta de escrita em `tenants/tenant_other_99/...` contornando validação local é bloqueada pelo emulador com `storage/unauthorized`. ✅ PASS
+- **D.5 — Rejeição Direta por Papel Restrito (Role "viewer"):** Usuário autenticado do mesmo tenant com claim `role: 'viewer'` tem escrita rejeitada pelo emulador com `storage/unauthorized`. ✅ PASS
+- **D.6 — Rejeição Direta Não Autenticado:** Upload direto após `signOut()` no SDK cliente é sumariamente bloqueado pelo emulador com `storage/unauthorized`. ✅ PASS
+
+---
+
+### E. Procedimento de Limpeza (Teardown)
+- **Objetos no Storage:** O objeto sintético (`photo_perm_01`) é excluído pelo próprio teste no cenário C.4. Um gancho defensivo em `afterAll` garante deleção adicional e encerramento de sessão via `signOut()`.
+- **Processos e Portas:** O script `scripts/test-storage-emulator.js` utiliza nativamente o comando `firebase emulators:exec`, que gerencia de ponta a ponta o encerramento gracioso dos processos Java e Node (`Stopping Authentication Emulator`, `Stopping Storage Emulator`, `Stopping emulator hub`), liberando imediatamente as portas 9099 e 9199 sem necessidade de finalização forçada (`taskkill /F`).
+- **Preservação de Sessões Anteriores (Evolução Fase 13.17):** Caso os emuladores já estivessem escutando nas portas (abordagem da Fase 13.15/13.16), o script tentava reutilizá-los; a partir da auditoria da Fase 13.17, adotou-se a política conservadora definitiva: qualquer porta ocupada aborta imediatamente sem sondagem nem reutilização, preservando processos de terceiros intactos.
+
+---
+
+### F. Diferença Entre as Suítes de Testes
+| Aspecto | Suíte Comum (`bun test`) | Suíte de Integração (`bun run test:storage-emulator`) |
+| :--- | :--- | :--- |
+| **Comando** | `bun test` | `bun run test:storage-emulator` |
+| **Arquivos Cobertos** | 27 arquivos (`*.test.js`) | 1 arquivo (`tests/storage_emulator.integration.js`) |
+| **Total de Testes** | 604 testes (inclui 10 testes do harness) | 10 testes de integração do storage |
+| **Dependência de Emuladores** | Nenhuma (isolada, mocks/in-memory) | Firebase Auth e Storage Emulators (gerenciados pelo script) |
+| **Tempo de Execução** | ~26 segundos | ~690ms de testes (+ tempo de boot do emulador se desligado) |
+| **Finalidade** | Regressão rápida de unidade, lógica e validação do harness | Homologação estrita de regras e protocolo HTTP/multipart do Storage |
+
+---
+
+### G. Resultados Observados nas Execuções Reais
+
+1. **Suíte Comum (`bun test`):**
+   - 604 testes aprovados (0 falhas) em 27 arquivos de teste (2264 expect calls).
+2. **Compilação de Produção (`bun run build`):**
+   - Vite v8.2.1 concluiu transformação de 94 módulos em 964ms com zero erros.
+3. **Suíte de Integração (`bun run test:storage-emulator`):**
+   - 10 testes de integração aprovados (0 falhas) em 1 arquivo (31 expect calls).
+   - Boot do emulador, execução e encerramento gracioso concluídos com código de saída 0.
+
+---
+
+### H. Classificações Finais da Fase 13.15
+* `STORAGE_EMULATOR_STARTUP_PASS`: Inicialização e encerramento automatizados do Storage Emulator (9199) e Auth Emulator (9099) validados sob o projeto `demo-gerenciador-produtos-staging`.
+* `STORAGE_RULES_VALIDATION_PASS`: Regras de segurança em `storage.rules` rigorosamente comprovadas contra escrita cross-tenant, não autenticada e papéis sem privilégio.
+* `STORAGE_PROVIDER_INTEGRATION_PASS`: `FirebaseStorageProvider` real integrado com sucesso com autenticação cliente, upload, download byte-a-byte, checagem de metadados e exclusão.
+* `REGRESSION_SUITE_PASS`: Suíte de 604 testes mantida íntegra, independente e sem necessidade de emuladores para o dia a dia.
+* **Firebase Cloud Staging:** Mantido como `NOT HOMOLOGATED` (ambiente na nuvem real intocado).
+
+---
+
+## 16. EVIDÊNCIAS DA FASE 13.16 — AUDITORIA DE SEGURANÇA DO ORQUESTRADOR E HARDENING DO CICLO DE VIDA
+
+### A. Diagnóstico dos Riscos Identificados e Resoluções Implementadas
+A auditoria minuciosa da implementação da Fase 13.15 identificou e solucionou quatro riscos de segurança e portabilidade:
+
+1. **Risco de Reutilização Cega de Portas:**
+   - *Diagnóstico Anterior:* O script original verificava apenas se um socket TCP conectava em 9099 e 9199. Um socket aberto não garantia que o serviço fosse o Firebase Emulator nem que pertencesse ao projeto autorizado.
+   - *Resolução Fase 13.16:* Implementada verificação em duas etapas via `inspectAndVerifyEmulators()`: consulta ao Emulator Hub (`http://127.0.0.1:4400/emulators`) e sondagem da API de autenticação (`/identitytoolkit.googleapis.com/.../projects/demo-gerenciador-produtos-staging/...`). Se a porta estiver aberta por um processo não verificado ou incompatível, o script **aborta imediatamente com código 1 (`status: CONFLICT`)** e **preserva o processo de terceiros sem encerrá-lo**.
+2. **Risco de Encerramento Forçado (`taskkill /F`):**
+   - *Diagnóstico Anterior:* O script anterior encerrava a árvore de processos via `taskkill /pid ... /T /F`, o que constituía terminação forçada abrupta sem encerramento gracioso dos sockets e arquivos de log.
+   - *Resolução Fase 13.16:* Adoção de `firebase emulators:exec --only storage,auth --project demo-gerenciador-produtos-staging "bun test ..."`. A própria CLI oficial do Firebase gerencia a inicialização, health checks, execução dos testes e o encerramento gracioso de cada emulador (`Stopping Authentication Emulator`, `Stopping Storage Emulator`, `Stopping emulator hub`) liberando as portas sem força bruta.
+3. **Escopo de Compatibilidade de Sistemas Operacionais:**
+   - *Diagnóstico Anterior:* A documentação anterior declarava o orquestrador como "multiplataforma", embora a instalação física e execução tenham ocorrido unicamente em Windows com caminho `C:\Program Files\Eclipse Adoptium\...`.
+   - *Resolução Fase 13.16:* O código foi aprimorado com abstrações portáveis (suporte a candidatos padrão em Linux/macOS, respeito a `JAVA_HOME` e `PATH`), mas a documentação registra com precisão que **o ambiente validado fisicamente é o Windows 11**.
+4. **Validação Fail-Closed do Project ID:**
+   - *Diagnóstico Anterior:* O Project ID era uma constante fixa sem validação contra variáveis de ambiente conflitantes.
+   - *Resolução Fase 13.16:* Implementada a função `validateProjectSafety()` que:
+     - Exige estritamente `clean === 'demo-gerenciador-produtos-staging'`;
+     - Exige o prefixo `demo-`;
+     - Bloqueia terminantemente projetos de produção via `isProductionProject()`;
+     - Aborta se `FIREBASE_PROJECT_ID` ou `VITE_FIREBASE_PROJECT_ID` estiverem definidos com valores divergentes (proteção contra configuration drift).
+
+---
+
+### B. Suíte de Testes Unitários de Segurança do Harness
+Foi criada a suíte dedicada `tests/storage_emulator_harness.test.js`, composta por 10 testes unitários cobrindo todos os cenários críticos:
+* Validação de aceitação exclusiva de `demo-gerenciador-produtos-staging`;
+* Rejeição de Project ID sem `demo-`;
+* Rejeição de Project ID divergente;
+* Bloqueio contra projetos de produção conhecidos;
+* Detecção de configuration drift em variáveis de ambiente;
+* Falha explícita quando nenhum JDK 21 está presente;
+* Resolução do JDK 21 sem alteração de variáveis globais do sistema;
+* Detecção precisa de conectividade TCP em portas efêmeras;
+* Detecção de conflito (`status: CONFLICT`) e preservação garantida de serviços de terceiros;
+* Detecção correta de portas livres (`status: PORTS_FREE`).
+
+**Resultado da Suíte do Harness:** **10 PASS / 0 FAIL (20 expect calls) em 376ms**.
+
+---
+
+### C. Execução e Regressão Completa da Fase 13.16
+
+1. **Suíte Comum (`bun test`):**
+   - 604 testes aprovados (0 falhas) em 27 arquivos de teste (2264 expect calls).
+2. **Compilação de Produção (`bun run build`):**
+   - Vite v8.2.1 transformou 94 módulos com sucesso em 964ms (0 erros).
+3. **Suíte de Integração (`bun run test:storage-emulator`):**
+   - Validação fail-closed do projeto demonstrativo: ✅ PASS
+   - Injeção isolada de OpenJDK 21 LTS: ✅ PASS
+   - Execução via `firebase emulators:exec`: ✅ PASS
+   - 10 testes de integração aprovados (0 falhas, 31 expect calls): ✅ PASS
+   - Encerramento gracioso de todos os emuladores: ✅ PASS
+   - Verificação pós-execução de portas fechadas (`Get-NetTCPConnection`): ✅ PASS (código de saída 1, portas 9099 e 9199 completamente liberadas).
+
+---
+
+### D. Classificação Final da Fase 13.16
+* `ORCHESTRATOR_SAFETY_AUDIT_PASS`: Orquestrador validado com fail-closed estrito, proteção contra configuration drift e verificação segura de portas.
+* `PROCESS_LIFECYCLE_HARDENING_PASS`: Ciclo de vida gerido nativamente por `emulators:exec` com encerramento gracioso e sem `taskkill /F`.
+* `THIRD_PARTY_SERVICE_PRESERVATION_PASS`: Processos não verificados são preservados intactos sem encerramento e com abortagem segura.
+* `REGRESSION_SUITE_PASS`: 604 testes aprovados across 27 arquivos e compilação de produção sem falhas.
+* **Firebase Cloud Staging:** Mantido como `NOT HOMOLOGATED` (ambiente na nuvem real intocado).
+
+---
+
+## 17. EVIDÊNCIAS DA FASE 13.17 — FINAL EMULATOR HARNESS CONSISTENCY AUDIT & COMMIT READINESS
+
+### A. Resolução da Consistência entre o Orquestrador e `firebase emulators:exec`
+A auditoria técnica final da Fase 13.17 unificou o comportamento de execução do orquestrador de testes de integração, eliminando ambiguidades sobre reutilização de sessões e adotando formalmente a **Política Conservadora de Portas**:
+
+1. **Eliminação de Reutilização Automática:**
+   - O orquestrador não tenta mais sondar endpoints de API (`Emulator Hub` ou `Auth REST`) para inferir ou adotar instâncias de emuladores preexistentes.
+   - `firebase emulators:exec` é o único mecanismo autorizado para orquestrar o ciclo de vida completo (boot, execução e desligamento gracioso).
+2. **Escopo de Portas Inspecionadas:**
+   - Com base nas configurações reais em `firebase.json` e nos padrões operacionais da Firebase CLI para o comando `--only storage,auth`, o harness inspeciona o conjunto completo de 4 portas obrigatórias antes da execução:
+     * **Authentication Emulator:** Porta `9099` (TCP)
+     * **Storage Emulator:** Porta `9199` (TCP)
+     * **Emulator UI:** Porta `4000` (TCP)
+     * **Emulator Hub:** Porta `4400` (TCP)
+3. **Comportamento Rigoroso em Conflito de Portas:**
+   - Se **TODAS** as 4 portas estiverem livres: inicia a suíte de emulação nativa via `firebase emulators:exec`.
+   - Se **QUALQUER** uma das portas estiver em uso: aborta imediatamente com `status: CONFLICT` e código de saída 1.
+   - **Zero Probe:** Nenhum payload de teste ou requisição HTTP é enviado às portas ocupadas.
+   - **Zero Process Termination:** Nenhum processo de terceiro é terminado ou forçado (`taskkill /F` terminantemente banido).
+   - O orquestrador orienta o usuário via mensagem detalhada no console a inspecionar os processos concorrentes e encerrá-los manualmente se apropriado.
+
+---
+
+### B. Project ID, Configuration Drift e Isolamento do Ambiente
+1. **Identificador Oficial:** Operação restrita a `demo-gerenciador-produtos-staging`.
+2. **Proteção Fail-Closed Ampliada:**
+   - Validação mandatória de prefixo `demo-` e bloqueio absoluto contra projetos de produção conhecidos (`caixa-autopecas`, etc.).
+   - Detecção e aborto em caso de configuration drift em variáveis de ambiente:
+     * `FIREBASE_PROJECT_ID`
+     * `VITE_FIREBASE_PROJECT_ID`
+     * `GCLOUD_PROJECT`
+3. **Escopo do JDK 21 e Preservação do Sistema:**
+   - O OpenJDK 21 LTS (`C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot`) é injetado estritamente nas variáveis `JAVA_HOME` e `PATH` do subprocesso de execução.
+   - O Java 8 (`jre1.8.0_471`) permanece como instalação padrão global do sistema Windows, sem poluição de variáveis de ambiente do usuário.
+4. **Escopo de Sistemas Operacionais:**
+   - A homologação técnica dos emuladores e testes foi executada e comprovada fisicamente no **Windows 11 x64**.
+   - Os caminhos de fallback presentes no script para Linux e macOS constituem compatibilidade teórica estruturada no código, mas **não** são declarados como homologados.
+
+---
+
+### C. Resultados Reais da Tríplice Regressão da Fase 13.17
+
+1. **Suíte Comum (`bun test`):**
+   - **608 testes aprovados (0 falhas)** em 27 arquivos de teste (2275 expect calls em ~24.09s).
+   - Inclui 14 testes unitários de segurança do harness em `tests/storage_emulator_harness.test.js`, validando todas as salvaguardas sem necessidade de emuladores ativos.
+2. **Compilação de Produção (`bun run build`):**
+   - **Vite v8.2.1** transformou 94 módulos com sucesso em **1.03s** (0 erros, bundle íntegro em `dist/`).
+3. **Suíte Permanente de Integração com Storage Emulator (`bun run test:storage-emulator`):**
+   - Todas as 4 portas (9099, 9199, 4000, 4400) confirmadas como livres antes da execução.
+   - Boot do cluster de emuladores executado via `firebase emulators:exec`.
+   - **10 testes de integração aprovados (0 falhas)** em 1 arquivo (31 expect calls em 617ms):
+     * C.1 & C.2: Inicialização, emuladores locais e verificação de claims do ID token (tenantId e role) ✅ PASS
+     * C.3: Upload sintético WebP pelo provedor e verificação de 100% de integridade binária byte-a-byte ✅ PASS
+     * C.4: Exclusão via provedor e confirmação de ausência via `provider.exists()` ✅ PASS
+     * D.1: Rejeição de upload cross-tenant pelas regras `storage.rules` no emulador ✅ PASS
+     * D.1b: Rejeição antecipada de acesso cross-tenant pelo cliente ✅ PASS
+     * D.2: Rejeição antecipada de MIME proibido (application/pdf) ✅ PASS
+     * D.3: Rejeição antecipada de arquivo acima de 10MB ✅ PASS
+     * D.4: Rejeição direta cross-tenant pelas regras do emulador ✅ PASS
+     * D.5: Rejeição direta por papel restrito (role "viewer") pelas regras do emulador ✅ PASS
+     * D.6: Rejeição direta de upload não autenticado após `signOut` pelas regras do emulador ✅ PASS
+   - Desligamento gracioso nativo pelo `emulators:exec` (`Stopping Authentication Emulator`, `Stopping Storage Emulator`, `Stopping emulator hub`).
+   - Sockets pós-execução inspecionados: portas 9099, 9199, 4000 e 4400 100% liberadas.
+   - Código de saída da execução: `0` (PASS).
+
+---
+
+### D. Classificação Final da Fase 13.17 e Estado dos Ambientes
+* `CONSISTENCY_AUDIT_PASS`: Orquestrador alinhado com política conservadora de portas e gerenciamento exclusivo por `firebase emulators:exec`.
+* `PORT_CONFLICT_SAFETY_PASS`: Aborto seguro sem sondagem e sem encerramento de processos em caso de porta ocupada comprovado em teste automatizado.
+* `STORAGE_EMULATOR_PERMANENT_HARNESS_PASS`: Suíte de integração permanente do Firebase Storage validada com sucesso ponta a ponta.
+* `COMMIT_READINESS_CONFIRMED`: Repositório consistente, testado e pronto para revisão de commit local.
+* **Firebase Cloud Staging:** Categoricamente mantido como **`NOT HOMOLOGATED`** (nenhum deploy, faturamento ou alteração em projetos na nuvem real).
