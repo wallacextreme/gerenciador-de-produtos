@@ -565,7 +565,7 @@ Foram auditadas e testadas contra o Realtime Database Emulator as políticas com
 Configuração de ambiente local isolado (`.env.emulator.local`) e implementação da salvaguarda **Fail-Closed** no validador de configuração do cliente (`src/js/utils/firebaseConfigValidator.js`).
 
 ### B. Regras de Proteção Fail-Closed
-1. O Project ID deve obrigatoriamente iniciar com `demo-` (ex: `demo-gerenciador-produtos-staging`), ativando a salvaguarda offline do Firebase SDK.
+1. O Project ID deve obrigatoriamente iniciar com `demo-` (ex: `demo-gerenciador-produtos-staging`), atuando em conjunto com a exigência mandatória de hosts locais para impor o isolamento offline.
 2. A presença de `VITE_FIREBASE_AUTH_EMULATOR_HOST` (porta 9099) e `VITE_FIREBASE_EMULATOR_HOST` (porta 9000) é estritamente obrigatória no modo `emulator`.
 3. Caso Cloud Storage seja utilizado, `VITE_FIREBASE_STORAGE_EMULATOR_HOST` (porta 9199) torna-se obrigatório.
 4. Qualquer configuração incompleta aborta a inicialização com diagnóstico explícito, sem jamais permitir fallback silencioso para a nuvem.
@@ -596,11 +596,16 @@ Validação ponta a ponta executada diretamente no navegador **Google Chrome** a
 | **7. Isolamento Entre Tenants** | Tentativa de gravação no tenant `/tenants/tenant-other/products/prod_illegal` a partir do navegador com o token de `tenant-staging` foi **rejeitada com HTTP 401 Permission Denied** pelo motor de regras do emulador. | ✅ PASS |
 | **8. Falha Segura sem Host de Emulador** | Testes isolados comprovaram que a ausência de `authEmulatorHost` ou `emulatorHost`, ou uso de ID sem `demo-`, interrompe a inicialização com mensagem diagnóstica clara. | ✅ PASS |
 | **9. Resiliência Offline e Reconexão** | Transição para offline ativou banner informativo no app; navegação e carregamento via IndexedDB continuaram funcionais; retorno ao modo online restaurou a conectividade normalmente. | ✅ PASS |
-| **10. Ausência de Fallback para Nuvem (Zero Egress)**| Auditoria de 107 requisições HTTP do navegador: 12 direcionadas aos emuladores locais (9099/9000) e **0 requisições externas para o Firebase Cloud**. | ✅ PASS |
+| **10. Ausência de Fallback para Nuvem no Fluxo Observado**| Na captura da execução documentada de navegador, foram registradas 107 requisições HTTP (12 direcionadas aos emuladores locais 9099/9000), sem chamadas aos domínios do Firebase Cloud nesta captura específica. | ✅ PASS |
 | **11. Suíte Completa de Testes (`bun test`)** | 594 testes executados across 26 arquivos — **594 PASS / 0 FAIL**. | ✅ PASS |
 | **12. Build de Produção (`bun run build`)** | Compilação Vite v8.2.1 de 94 módulos concluída em **851ms** (0 erros). | ✅ PASS |
 | **13. Estado do Git** | Branch `main`, sem novos commits, arquivos locais modificados preservados, `.env.*` ignorados. | **LOCAL CHANGES** |
 
-### C. Classificação da Fase 13.10
-**Resultado:** `BROWSER_EMULATOR_E2E_PASS` (com Storage marcado como `NOT VERIFIED` devido a restrição do ambiente de JDK).
+### C. Limites das Evidências e Estado dos Ambientes
+* **Proteção Implementada:** A validação fail-closed em `firebaseConfigValidator.js` impede a inicialização no modo `emulator` se faltar o prefixo `demo-` ou se qualquer host de emulador obrigatório estiver ausente. O prefixo `demo-` isoladamente não constitui garantia universal contra tráfego externo; sua eficácia decorre da ação combinada com os hosts locais configurados.
+* **Limite da Evidência de Navegador:** A captura de 107 requisições HTTP reflete a execução observada nos fluxos testados (login, leitura/escrita sintética, navegação e contingência offline), e não uma prova universal de ausência de tráfego externo em todos os possíveis fluxos da aplicação.
+* **Storage Emulator:** Mantido como `NOT VERIFIED` devido à restrição do wrapper de CLI exigir JDK 21+ no ambiente atual (Java 1.8).
+* **Firebase Cloud Staging:** Mantido como `NOT HOMOLOGATED` até que um projeto de staging seja efetivamente provisionado no Firebase Console e uma homologação real seja autorizada e executada.
 
+### D. Classificação da Fase 13.10
+**Resultado:** `BROWSER_EMULATOR_E2E_PASS` (com Storage Emulator classificado como `NOT VERIFIED` e Firebase Cloud staging classificado como `NOT HOMOLOGATED`).
