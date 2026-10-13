@@ -4,7 +4,9 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
-import { ref, set, get, update, remove } from 'firebase/database';
+import { ref, set, get, update, remove, runTransaction } from 'firebase/database';
+import { arePayloadsEquivalent, computeCanonicalPayloadHash } from '../src/js/utils/operationIdentity.js';
+import { MockRealtimeProvider } from '../src/js/sync/MockRealtimeProvider.js';
 
 let testEnv;
 let spawnedProcess = null;
@@ -56,6 +58,26 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
         rules: rulesContent
       }
     });
+
+    // Harmonização canônica: Em testes anteriores da Phase 13, os contextos foram escritos
+    // com { role: 'admin' | 'operator' } antes do cutover canônico da Phase 14.5.
+    // Mapeamos para claims canônicas nos fixtures da Phase 13, preservando rigorosamente
+    // as claims originais nos testes específicos da Phase 14 (identificados por prefixo).
+    const originalAuthenticatedContext = testEnv.authenticatedContext.bind(testEnv);
+    testEnv.authenticatedContext = (uid, token = {}) => {
+      if (uid && (uid.startsWith('u_p14_') || uid.startsWith('u_legacy_') || uid === 'u_self_elevation')) {
+        return originalAuthenticatedContext(uid, token);
+      }
+      const enrichedToken = { ...token };
+      if (token && typeof token === 'object') {
+        if (!('appRole' in token)) {
+          if (token.role === 'admin') enrichedToken.appRole = 'admin';
+          else if (token.role === 'operator') enrichedToken.appRole = 'operator';
+          else if (token.role === 'viewer') enrichedToken.appRole = 'viewer';
+        }
+      }
+      return originalAuthenticatedContext(uid, enrichedToken);
+    };
   });
 
   afterAll(async () => {
@@ -419,7 +441,9 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
       // 3. Atualizar produto
       await assertSucceeds(update(ref(db, 'tenants/tenantA/products/pLegit1'), {
         name: 'Produto Legítimo Atualizado',
-        salePriceCents: 2700
+        salePriceCents: 2700,
+        baseVersion: 1,
+        version: 2
       }));
 
       // 4. Criar e ler estoque
@@ -475,7 +499,8 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
       await assertSucceeds(set(ref(db, 'tenants/tenantA/products/pOp1'), {
         id: 'pOp1',
         name: 'Produto Operador',
-        salePriceCents: 1500
+        salePriceCents: 1500,
+        version: 1
       }));
       await assertSucceeds(set(ref(db, 'tenants/tenantA/sales/saleOp1'), {
         id: 'saleOp1',
@@ -546,7 +571,8 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
       await assertSucceeds(set(ref(db, 'tenants/tenantAlpha/products/pAlpha'), {
         id: 'pAlpha',
         name: 'Produto Alpha',
-        salePriceCents: 3000
+        salePriceCents: 3000,
+        version: 1
       }));
       await assertSucceeds(get(ref(db, 'tenants/tenantAlpha/products/pAlpha')));
     });
@@ -569,7 +595,8 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
       await assertSucceeds(set(ref(db, 'tenants/tenantAlpha/products/pFallback'), {
         id: 'pFallback',
         name: 'Produto Gravado por Fallback',
-        salePriceCents: 4500
+        salePriceCents: 4500,
+        version: 1
       }));
       await assertSucceeds(get(ref(db, 'tenants/tenantAlpha/products/pFallback')));
 
@@ -2014,7 +2041,8 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
       await assertSucceeds(set(ref(db, 'tenants/tenantA/products/prod_coh_1'), {
         id: 'prod_coh_1',
         name: 'Produto Coerente',
-        salePriceCents: 1500
+        salePriceCents: 1500,
+        version: 1
       }));
       await assertSucceeds(set(ref(db, 'tenants/tenantA/settings/tax_p136'), {
         rate: 0.18
@@ -2030,7 +2058,8 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
       await assertSucceeds(set(ref(db, 'tenants/tenantA/products/prod_claimsonly_1'), {
         id: 'prod_claimsonly_1',
         name: 'Produto Sem Perfil',
-        salePriceCents: 2000
+        salePriceCents: 2000,
+        version: 1
       }));
       await assertSucceeds(set(ref(db, 'tenants/tenantA/settings/sys_p136'), {
         enabled: true
@@ -2072,7 +2101,8 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
       await assertSucceeds(set(ref(opDb, 'tenants/tenantA/products/prod_p136_op'), {
         id: 'prod_p136_op',
         name: 'Produto do Operador',
-        salePriceCents: 3000
+        salePriceCents: 3000,
+        version: 1
       }));
 
       // Mas é ESTRITAMENTE RECUSADO em operações restritas a admin (settings, purchases)
@@ -2172,7 +2202,8 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
       await assertSucceeds(set(ref(opDb, 'tenants/tenantA/products/prod_fb_ok'), {
         id: 'prod_fb_ok',
         name: 'Produto Fallback',
-        salePriceCents: 1200
+        salePriceCents: 1200,
+        version: 1
       }));
 
       // Escrita restrita de admin (settings) recusada
@@ -2245,7 +2276,8 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
       await assertSucceeds(set(ref(opDb, 'tenants/tenantA/products/prod_legit_136'), {
         id: 'prod_legit_136',
         name: 'Produto Legítimo',
-        salePriceCents: 2500
+        salePriceCents: 2500,
+        version: 1
       }));
       await assertSucceeds(set(ref(opDb, 'tenants/tenantA/sales/sale_legit_136'), {
         id: 'sale_legit_136',
@@ -2332,7 +2364,8 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
       await assertSucceeds(set(ref(claimsDb, 'tenants/tenantA/products/p_claims_post_delete'), {
         id: 'p_claims_post_delete',
         name: 'Produto Criado Com Token Ativo',
-        salePriceCents: 999
+        salePriceCents: 999,
+        version: 1
       }));
 
       // 14B. Usuário Sem Custom Claims (dependente do nó /users/uid)
@@ -2361,6 +2394,2627 @@ describe('PHASE 13.2 — Executable Realtime Database Security Rules Tests', () 
       }));
     });
   });
+
+  // =========================================================================
+  // PHASE 14.2 — VALIDAÇÃO DE TRANSIÇÃO DE CLAIMS E RETROCOMPATIBILIDADE RTDB
+  // =========================================================================
+  describe('PHASE 14.2 — Transição Canônica de Claims e Retrocompatibilidade RTDB', () => {
+    beforeEach(async () => {
+      // Seed inicial de tenantA e tenantB
+      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
+        const db = adminCtx.database();
+        await set(ref(db, 'tenants/tenantA/products/p_seed_p14'), {
+          id: 'p_seed_p14',
+          name: 'Produto Base',
+          salePriceCents: 1500
+        });
+        await set(ref(db, 'users/user_tenantA_target'), {
+          displayName: 'Membro Tenant A',
+          tenantId: 'tenantA',
+          role: 'operator'
+        });
+      });
+    });
+
+    it('14.2.1: Token Novo Canônico (role: authenticated, appRole: admin) deve possuir privilégios administrativos plenos', async () => {
+      const adminCtx = testEnv.authenticatedContext('u_p14_admin', {
+        role: 'authenticated',
+        appRole: 'admin',
+        tenantId: 'tenantA'
+      });
+      const db = adminCtx.database();
+
+      // Gravação em produtos
+      await assertSucceeds(set(ref(db, 'tenants/tenantA/products/p_p14_new'), {
+        id: 'p_p14_new',
+        name: 'Produto Criado por Token Novo Admin',
+        salePriceCents: 3200,
+        version: 1
+      }));
+
+      // Gravação em compras (privilégio admin)
+      await assertSucceeds(set(ref(db, 'tenants/tenantA/purchases/pur_p14_new'), {
+        id: 'pur_p14_new',
+        totalAmountCents: 8500
+      }));
+
+      // Gravação em configurações (privilégio admin)
+      await assertSucceeds(set(ref(db, 'tenants/tenantA/settings/loja'), {
+        nomeFantasia: 'GestãoPro Staging'
+      }));
+
+      // Gravação de manifesto de imagens e sync metadata
+      await assertSucceeds(set(ref(db, 'tenants/tenantA/imageManifest/img_p14'), {
+        id: 'img_p14',
+        productId: 'p_p14_new',
+        url: 'https://test.supabase.co/img.webp',
+        version: 1
+      }));
+      await assertSucceeds(set(ref(db, 'tenants/tenantA/syncMetadata'), {
+        lastSync: Date.now()
+      }));
+
+      // Administração de usuários do mesmo tenant
+      await assertSucceeds(get(ref(db, 'users/user_tenantA_target')));
+      await assertSucceeds(update(ref(db, 'users/user_tenantA_target'), {
+        displayName: 'Membro Tenant A Atualizado por Novo Admin'
+      }));
+    });
+
+    it('14.2.2: Token Novo Canônico (role: authenticated, appRole: operator) deve operar catálogo e vendas, mas ser bloqueado em compras e configurações', async () => {
+      const opCtx = testEnv.authenticatedContext('u_p14_op', {
+        role: 'authenticated',
+        appRole: 'operator',
+        tenantId: 'tenantA'
+      });
+      const db = opCtx.database();
+
+      // Permitido: produtos e vendas
+      await assertSucceeds(set(ref(db, 'tenants/tenantA/products/p_p14_op'), {
+        id: 'p_p14_op',
+        name: 'Produto Operador Novo Token',
+        salePriceCents: 1200,
+        version: 1
+      }));
+      await assertSucceeds(set(ref(db, 'tenants/tenantA/sales/sale_p14_op'), {
+        id: 'sale_p14_op',
+        productId: 'p_p14_op',
+        quantity: 1,
+        totalSaleCents: 1200
+      }));
+
+      // Bloqueado: compras, configurações e administração de usuários
+      await assertFails(set(ref(db, 'tenants/tenantA/purchases/pur_blocked_op'), {
+        id: 'pur_blocked_op',
+        totalAmountCents: 4000
+      }));
+      await assertFails(set(ref(db, 'tenants/tenantA/settings/blocked'), {
+        segredo: 'proibido'
+      }));
+      await assertFails(update(ref(db, 'users/user_tenantA_target'), {
+        role: 'admin'
+      }));
+    });
+
+    it('14.2.3: Token Novo Canônico (role: authenticated, appRole: viewer) deve ter acesso somente leitura', async () => {
+      const viewerCtx = testEnv.authenticatedContext('u_p14_viewer', {
+        role: 'authenticated',
+        appRole: 'viewer',
+        tenantId: 'tenantA'
+      });
+      const db = viewerCtx.database();
+
+      // Leitura permitida
+      await assertSucceeds(get(ref(db, 'tenants/tenantA/products/p_seed_p14')));
+
+      // Todas as gravações bloqueadas
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_viewer_fail'), {
+        id: 'p_viewer_fail',
+        name: 'Tentativa Viewer',
+        salePriceCents: 100
+      }));
+      await assertFails(set(ref(db, 'tenants/tenantA/sales/s_viewer_fail'), {
+        id: 's_viewer_fail',
+        productId: 'p_seed_p14',
+        quantity: 1,
+        totalSaleCents: 100
+      }));
+      await assertFails(set(ref(db, 'tenants/tenantA/purchases/pur_viewer_fail'), {
+        id: 'pur_viewer_fail',
+        totalAmountCents: 100
+      }));
+    });
+
+    it('14.2.4: Token Novo Incompleto (role: authenticated sem appRole) deve falhar de forma segura sem conceder escrita', async () => {
+      const incompleteCtx = testEnv.authenticatedContext('u_p14_incomplete', {
+        role: 'authenticated',
+        tenantId: 'tenantA'
+      });
+      const db = incompleteCtx.database();
+
+      // Leitura do próprio tenant é permitida (membro autenticado)
+      await assertSucceeds(get(ref(db, 'tenants/tenantA/products/p_seed_p14')));
+
+      // Gravação DEVE falhar de forma segura (sem concessão de escrita privilegiada)
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_incomplete_fail'), {
+        id: 'p_incomplete_fail',
+        name: 'Incompleto Deve Falhar',
+        salePriceCents: 500
+      }));
+      await assertFails(set(ref(db, 'tenants/tenantA/purchases/pur_incomplete_fail'), {
+        id: 'pur_incomplete_fail',
+        totalAmountCents: 500
+      }));
+    });
+
+    it('14.2.5: Token Novo com Papel Desconhecido (appRole: superadmin) deve ter gravação rejeitada', async () => {
+      const unknownRoleCtx = testEnv.authenticatedContext('u_p14_unknown', {
+        role: 'authenticated',
+        appRole: 'superadmin',
+        tenantId: 'tenantA'
+      });
+      const db = unknownRoleCtx.database();
+
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_unknown_fail'), {
+        id: 'p_unknown_fail',
+        name: 'Desconhecido Deve Falhar',
+        salePriceCents: 500
+      }));
+      await assertFails(set(ref(db, 'tenants/tenantA/purchases/pur_unknown_fail'), {
+        id: 'pur_unknown_fail',
+        totalAmountCents: 500
+      }));
+    });
+
+    it('14.2.6: Tokens legados sem appRole (role: admin e role: operator) têm escrita negada (cutover canônico)', async () => {
+      // Admin legado sem appRole
+      const legacyAdminCtx = testEnv.authenticatedContext('u_legacy_admin', {
+        role: 'admin',
+        tenantId: 'tenantA'
+      });
+      await assertFails(set(ref(legacyAdminCtx.database(), 'tenants/tenantA/products/p_legacy_admin'), {
+        id: 'p_legacy_admin',
+        name: 'Tentativa por Admin Legado',
+        salePriceCents: 2000
+      }));
+      await assertFails(set(ref(legacyAdminCtx.database(), 'tenants/tenantA/purchases/pur_legacy_admin'), {
+        id: 'pur_legacy_admin',
+        totalAmountCents: 7000
+      }));
+
+      // Operator legado sem appRole
+      const legacyOpCtx = testEnv.authenticatedContext('u_legacy_op', {
+        role: 'operator',
+        tenantId: 'tenantA'
+      });
+      await assertFails(set(ref(legacyOpCtx.database(), 'tenants/tenantA/products/p_legacy_op'), {
+        id: 'p_legacy_op',
+        name: 'Tentativa por Operador Legado',
+        salePriceCents: 1800
+      }));
+      await assertFails(set(ref(legacyOpCtx.database(), 'tenants/tenantA/purchases/pur_legacy_op_fail'), {
+        id: 'pur_legacy_op_fail',
+        totalAmountCents: 3000
+      }));
+    });
+
+    it('14.2.7: Token com claims conflitantes (role: admin e appRole: viewer) não eleva privilégio', async () => {
+      const conflictCtx = testEnv.authenticatedContext('u_p14_conflict', {
+        role: 'admin',
+        appRole: 'viewer',
+        tenantId: 'tenantA'
+      });
+      const db = conflictCtx.database();
+
+      // Como appRole é viewer, o fallback para role legado é desativado e o acesso de escrita é negado
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_conflict_fail'), {
+        id: 'p_conflict_fail',
+        name: 'Conflito Deve Falhar',
+        salePriceCents: 1000
+      }));
+    });
+
+    it('14.2.8: Isolamento estrito entre tenants com novos tokens (rejeição de cross-tenant)', async () => {
+      const adminTenantBCtx = testEnv.authenticatedContext('u_p14_admin_tenantB', {
+        role: 'authenticated',
+        appRole: 'admin',
+        tenantId: 'tenantB'
+      });
+      const db = adminTenantBCtx.database();
+
+      // Admin do Tenant B tentando ler ou alterar dados do Tenant A
+      await assertFails(get(ref(db, 'tenants/tenantA/products/p_seed_p14')));
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_cross_fail'), {
+        id: 'p_cross_fail',
+        name: 'Invasão Cross-Tenant',
+        salePriceCents: 100
+      }));
+    });
+
+    it('14.2.9: Bloqueio de auto-elevação com appRole no próprio perfil', async () => {
+      const userCtx = testEnv.authenticatedContext('u_self_elevation', {});
+      const db = userCtx.database();
+
+      // Tentativa de criar perfil contendo appRole
+      await assertFails(set(ref(db, 'users/u_self_elevation'), {
+        displayName: 'Atacante',
+        appRole: 'admin'
+      }));
+    });
+
+    it('14.3.1: Token conflitante/inválido (role: admin com appRole: superadmin) não obtém privilégios por fallback', async () => {
+      const superadminCtx = testEnv.authenticatedContext('u_p14_superadmin_fail', {
+        role: 'admin',
+        appRole: 'superadmin',
+        tenantId: 'tenantA'
+      });
+      const db = superadminCtx.database();
+
+      // A presença de appRole não-nulo impede o fallback para auth.token.role.
+      // Como 'superadmin' não é 'admin' nem 'operator', a escrita DEVE falhar.
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_superadmin_fail'), {
+        id: 'p_superadmin_fail',
+        name: 'Superadmin Não Permitido',
+        salePriceCents: 1000
+      }));
+      await assertFails(set(ref(db, 'tenants/tenantA/purchases/pur_superadmin_fail'), {
+        id: 'pur_superadmin_fail',
+        totalAmountCents: 5000
+      }));
+    });
+
+    it('14.3.2: Token conflitante/inválido (role: operator com appRole: invalid) não obtém privilégios por fallback', async () => {
+      const badOpCtx = testEnv.authenticatedContext('u_p14_bad_op', {
+        role: 'operator',
+        appRole: 'invalid_role',
+        tenantId: 'tenantA'
+      });
+      const db = badOpCtx.database();
+
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_bad_op_fail'), {
+        id: 'p_bad_op_fail',
+        name: 'Operador Inválido Falha',
+        salePriceCents: 1000
+      }));
+    });
+
+    it('14.3.3: Token legado com role: viewer pode ler mas não pode escrever no próprio tenant', async () => {
+      const legacyViewerCtx = testEnv.authenticatedContext('u_p14_legacy_viewer', {
+        role: 'viewer',
+        tenantId: 'tenantA'
+      });
+      const db = legacyViewerCtx.database();
+
+      // Leitura permitida para membro do tenant
+      await assertSucceeds(get(ref(db, 'tenants/tenantA/products/p_seed_p14')));
+
+      // Escrita negada
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_legacy_viewer_write'), {
+        id: 'p_legacy_viewer_write',
+        name: 'Viewer Não Pode Escrever',
+        salePriceCents: 1000
+      }));
+    });
+
+    it('14.3.4: Token sem tenantId (mesmo com appRole: admin) não pode acessar nem escrever em nós de tenant', async () => {
+      const noTenantCtx = testEnv.authenticatedContext('u_p14_no_tenant', {
+        role: 'authenticated',
+        appRole: 'admin'
+        // tenantId ausente
+      });
+      const db = noTenantCtx.database();
+
+      await assertFails(get(ref(db, 'tenants/tenantA/products/p_seed_p14')));
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_no_tenant_fail'), {
+        id: 'p_no_tenant_fail',
+        name: 'Sem Tenant Falha',
+        salePriceCents: 1000
+      }));
+    });
+
+    it('14.3.5: Escrita em nós protegidos (movimento de inventário) exige schema e delta estritos', async () => {
+      const canonicalAdminCtx = testEnv.authenticatedContext('u_p14_admin_ledger', {
+        role: 'authenticated',
+        appRole: 'admin',
+        tenantId: 'tenantA'
+      });
+      const db = canonicalAdminCtx.database();
+
+      // Movimento de estoque com schema incompleto ou delta inconsistente deve ser rejeitado
+      await assertFails(set(ref(db, 'tenants/tenantA/inventory/mov_invalid'), {
+        id: 'mov_invalid',
+        productId: 'p_seed_p14',
+        type: 'IN',
+        quantity: 10,
+        delta: 5 // delta deve ser igual a quantity para tipo IN
+      }));
+    });
+
+    it('14.4.1: Token com appRole: null tem escrita protegida categoricamente negada (gap de privilégio eliminado no RTDB)', async () => {
+      // No RTDB com regras canônicas estritas (Phase 14.5), auth.token.appRole === 'admin' é estritamente exigido.
+      // O valor null NÃO satisfaz a condição canônica e não possui mais fallback para auth.token.role.
+      const nullAppRoleCtx = testEnv.authenticatedContext('u_p14_null_approle', {
+        role: 'admin',
+        appRole: null,
+        tenantId: 'tenantA'
+      });
+      const db = nullAppRoleCtx.database();
+
+      // Escrita em produtos DEVE falhar
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_null_approle_fail'), {
+        id: 'p_null_approle_fail',
+        name: 'Produto Null AppRole RTDB Rejeitado',
+        salePriceCents: 1500
+      }));
+      // Escrita em compras DEVE falhar
+      await assertFails(set(ref(db, 'tenants/tenantA/purchases/pur_null_approle_fail'), {
+        id: 'pur_null_approle_fail',
+        totalAmountCents: 5000
+      }));
+    });
+
+    it('14.4.2: RTDB Semântica: Token com appRole vazio ("") avalia auth.token.appRole == null como falso e tem escrita rejeitada (fail-closed)', async () => {
+      // Quando appRole está presente com string vazia "", auth.token.appRole == null é falso!
+      const emptyAppRoleCtx = testEnv.authenticatedContext('u_p14_empty_approle', {
+        role: 'admin',
+        appRole: '',
+        tenantId: 'tenantA'
+      });
+      const db = emptyAppRoleCtx.database();
+
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_empty_approle_fail'), {
+        id: 'p_empty_approle_fail',
+        name: 'Produto Empty AppRole Falha',
+        salePriceCents: 1500
+      }));
+    });
+
+    it('14.5.1: Leitura administrativa em /users/$uid: membro canônico admin pode ler outro perfil do mesmo tenant, mas token legado ou sem appRole é negado', async () => {
+      // Seed de um usuário no tenantA
+      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
+        await set(ref(adminCtx.database(), 'users/user_alvo_tenantA'), {
+          displayName: 'Usuário Alvo',
+          tenantId: 'tenantA',
+          role: 'operator'
+        });
+      });
+
+      // Admin canônico com appRole: admin e tenantId: tenantA
+      const canonicalAdminCtx = testEnv.authenticatedContext('u_p14_canonical_reader', {
+        role: 'authenticated',
+        appRole: 'admin',
+        tenantId: 'tenantA'
+      });
+      await assertSucceeds(get(ref(canonicalAdminCtx.database(), 'users/user_alvo_tenantA')));
+
+      // Token legado com role: admin mas sem appRole
+      const legacyAdminCtx = testEnv.authenticatedContext('u_legacy_reader_fail', {
+        role: 'admin',
+        tenantId: 'tenantA'
+      });
+      await assertFails(get(ref(legacyAdminCtx.database(), 'users/user_alvo_tenantA')));
+
+      // Token com role: admin e appRole: null
+      const nullAppRoleCtx = testEnv.authenticatedContext('u_p14_null_reader_fail', {
+        role: 'admin',
+        appRole: null,
+        tenantId: 'tenantA'
+      });
+      await assertFails(get(ref(nullAppRoleCtx.database(), 'users/user_alvo_tenantA')));
+    });
+  });
+
+  describe('PHASE 14.12 — RTDB Security Rules: Identity Immutability, Version Monotonicity & Ledger Integrity', () => {
+    const adminCtx = () => testEnv.authenticatedContext('admin_p14_12', { role: 'authenticated', appRole: 'admin', tenantId: 'tenantA' });
+    const operatorCtx = () => testEnv.authenticatedContext('op_p14_12', { role: 'authenticated', appRole: 'operator', tenantId: 'tenantA' });
+
+    it('14.12.1: Produto com id divergente da chave ($productId) é rejeitado', async () => {
+      const db = adminCtx().database();
+      await assertFails(set(ref(db, 'tenants/tenantA/products/p_prod_key_1'), {
+        id: 'p_prod_key_DIFFERENT',
+        name: 'Produto Chave Incompatível',
+        salePriceCents: 1500,
+        version: 1
+      }));
+    });
+
+    it('14.12.2: Produto com id idêntico à chave é aceito e inicializado', async () => {
+      const db = adminCtx().database();
+      await assertSucceeds(set(ref(db, 'tenants/tenantA/products/p_prod_key_valid'), {
+        id: 'p_prod_key_valid',
+        name: 'Produto Válido',
+        salePriceCents: 1500,
+        version: 1
+      }));
+    });
+
+    it('14.12.3: Atualização de produto alterando o id é estritamente rejeitada (imutabilidade de identidade)', async () => {
+      const db = adminCtx().database();
+      await set(ref(db, 'tenants/tenantA/products/p_prod_key_valid'), {
+        id: 'p_prod_key_valid',
+        name: 'Produto Válido',
+        salePriceCents: 1500,
+        version: 1
+      });
+      await assertFails(update(ref(db, 'tenants/tenantA/products/p_prod_key_valid'), {
+        id: 'p_prod_key_MUTATED'
+      }));
+    });
+
+    it('14.12.4: Atualização de produto incrementando versão (v1 -> v2) é permitida', async () => {
+      const db = adminCtx().database();
+      await set(ref(db, 'tenants/tenantA/products/p_prod_key_valid'), {
+        id: 'p_prod_key_valid',
+        name: 'Produto Válido',
+        salePriceCents: 1500,
+        version: 1
+      });
+      await assertSucceeds(update(ref(db, 'tenants/tenantA/products/p_prod_key_valid'), {
+        salePriceCents: 2000,
+        baseVersion: 1,
+        version: 2
+      }));
+    });
+
+    it('14.12.5: Retrocesso de versão de produto (v2 -> v1) é categoricamente rejeitado pelas regras RTDB', async () => {
+      const db = adminCtx().database();
+      await set(ref(db, 'tenants/tenantA/products/p_prod_key_valid'), {
+        id: 'p_prod_key_valid',
+        name: 'Produto Válido',
+        salePriceCents: 2000,
+        version: 1
+      });
+      await update(ref(db, 'tenants/tenantA/products/p_prod_key_valid'), {
+        baseVersion: 1,
+        version: 2
+      });
+      await assertFails(update(ref(db, 'tenants/tenantA/products/p_prod_key_valid'), {
+        salePriceCents: 2500,
+        version: 1
+      }));
+    });
+
+    it('14.12.6: Venda com id divergente da chave é rejeitada', async () => {
+      const db = operatorCtx().database();
+      await assertFails(set(ref(db, 'tenants/tenantA/sales/sale_key_1'), {
+        id: 'sale_mismatch',
+        productId: 'p_prod_key_valid',
+        quantity: 1,
+        totalSaleCents: 1500
+      }));
+    });
+
+    it('14.12.7: Venda válida com id correspondente à chave é aceita', async () => {
+      const db = operatorCtx().database();
+      await assertSucceeds(set(ref(db, 'tenants/tenantA/sales/sale_key_valid'), {
+        id: 'sale_key_valid',
+        productId: 'p_prod_key_valid',
+        quantity: 2,
+        totalSaleCents: 3000
+      }));
+    });
+
+    it('14.12.8: Tentativa de alterar productId de venda existente é rejeitada (imutabilidade comercial)', async () => {
+      const db = adminCtx().database();
+      await set(ref(db, 'tenants/tenantA/sales/sale_key_valid'), {
+        id: 'sale_key_valid',
+        productId: 'p_prod_key_valid',
+        quantity: 2,
+        totalSaleCents: 3000
+      });
+      await assertFails(update(ref(db, 'tenants/tenantA/sales/sale_key_valid'), {
+        productId: 'p_another_product'
+      }));
+    });
+
+    it('14.12.9: Compra com id divergente da chave é rejeitada', async () => {
+      const db = adminCtx().database();
+      await assertFails(set(ref(db, 'tenants/tenantA/purchases/pur_key_1'), {
+        id: 'pur_mismatch',
+        productId: 'p_prod_key_valid',
+        quantity: 10,
+        totalAmountCents: 5000
+      }));
+    });
+
+    it('14.12.10: Compra válida com id correspondente à chave é aceita e id não pode ser alterado', async () => {
+      const db = adminCtx().database();
+      await assertSucceeds(set(ref(db, 'tenants/tenantA/purchases/pur_key_valid'), {
+        id: 'pur_key_valid',
+        productId: 'p_prod_key_valid',
+        quantity: 10,
+        totalAmountCents: 5000
+      }));
+
+      // Tentativa de alterar o id da compra
+      await assertFails(update(ref(db, 'tenants/tenantA/purchases/pur_key_valid'), {
+        id: 'pur_tampered'
+      }));
+    });
+
+    it('14.12.11: Movimento de estoque append-only: criação aceita, mas sobrescrita, update ou deleção rejeitados', async () => {
+      const db = operatorCtx().database();
+      const movPayload = {
+        id: 'mov_p14_12_strict',
+        productId: 'p_prod_key_valid',
+        delta: 5,
+        type: 'IN',
+        quantity: 5,
+        date: '2026-10-11'
+      };
+
+      // 1. Criação no ledger: aceita
+      await assertSucceeds(set(ref(db, 'tenants/tenantA/inventory/mov_p14_12_strict'), movPayload));
+
+      // 2. Tentativa de sobrescrever com set: rejeitada (append-only)
+      await assertFails(set(ref(db, 'tenants/tenantA/inventory/mov_p14_12_strict'), {
+        ...movPayload,
+        quantity: 10,
+        delta: 10
+      }));
+
+      // 3. Tentativa de modificar via update: rejeitada
+      await assertFails(update(ref(db, 'tenants/tenantA/inventory/mov_p14_12_strict'), {
+        quantity: 99
+      }));
+
+      // 4. Tentativa de deletar via remove: rejeitada
+      await assertFails(remove(ref(db, 'tenants/tenantA/inventory/mov_p14_12_strict')));
+    });
+  });
+
+  describe('PHASE 14.12 — Real Concurrency & Atomic Transaction Suite in RTDB Emulator', () => {
+    const clientAdmin1 = () => testEnv.authenticatedContext('admin_client_1', { role: 'authenticated', appRole: 'admin', tenantId: 'tenantA' });
+    const clientAdmin2 = () => testEnv.authenticatedContext('admin_client_2', { role: 'authenticated', appRole: 'admin', tenantId: 'tenantA' });
+    const clientTenantB = () => testEnv.authenticatedContext('admin_tenant_b', { role: 'authenticated', appRole: 'admin', tenantId: 'tenantB' });
+
+    it('14.12.12: Dois clientes tentando criar o mesmo ID com dados divergentes: exatamente um comita, o segundo aborta por conflito sem sobrescrever', async () => {
+      const db1 = clientAdmin1().database();
+      const db2 = clientAdmin2().database();
+      const path = 'tenants/tenantA/products/p_race_divergent_1';
+
+      const payload1 = { id: 'p_race_divergent_1', name: 'Item Original', salePriceCents: 1000, version: 1 };
+      const payload2 = { id: 'p_race_divergent_1', name: 'Item Concorrente', salePriceCents: 2000, version: 1 };
+
+      const runCreateTx = async (db, payload) => {
+        let abortReason = null;
+        const txResult = await runTransaction(ref(db, path), (current) => {
+          if (current === null) {
+            return { ...payload };
+          }
+          if (arePayloadsEquivalent('products', payload, current)) {
+            abortReason = 'EQUIVALENT';
+            return undefined;
+          }
+          abortReason = 'DIVERGENT';
+          return undefined;
+        }, { applyLocally: false });
+        return { txResult, abortReason };
+      };
+
+      // Dispara simultaneamente
+      const [res1, res2] = await Promise.all([
+        runCreateTx(db1, payload1),
+        runCreateTx(db2, payload2)
+      ]);
+
+      // Exatamente um comitou
+      const committedCount = (res1.txResult.committed ? 1 : 0) + (res2.txResult.committed ? 1 : 0);
+      expect(committedCount).toBe(1);
+
+      // O que não comitou detectou divergência
+      const uncommitted = res1.txResult.committed ? res2 : res1;
+      expect(uncommitted.abortReason).toBe('DIVERGENT');
+
+      // Estado final no banco no emulador é o do vencedor
+      const finalSnap = await get(ref(db1, path));
+      expect(finalSnap.exists()).toBe(true);
+      const winnerPayload = res1.txResult.committed ? payload1 : payload2;
+      expect(finalSnap.val().salePriceCents).toBe(winnerPayload.salePriceCents);
+      expect(finalSnap.val().name).toBe(winnerPayload.name);
+    });
+
+    it('14.12.13: Duas criações com o mesmo ID e conteúdo equivalente: segundo reconhece já aplicado sem segundo efeito', async () => {
+      const db1 = clientAdmin1().database();
+      const db2 = clientAdmin2().database();
+      const path = 'tenants/tenantA/products/p_race_equiv_1';
+
+      const payload = { id: 'p_race_equiv_1', name: 'Item Idêntico', salePriceCents: 1500, version: 1 };
+
+      const runCreateTx = async (db) => {
+        let abortReason = null;
+        const txResult = await runTransaction(ref(db, path), (current) => {
+          if (current === null) {
+            return { ...payload };
+          }
+          if (arePayloadsEquivalent('products', payload, current)) {
+            abortReason = 'EQUIVALENT';
+            return undefined;
+          }
+          abortReason = 'DIVERGENT';
+          return undefined;
+        }, { applyLocally: false });
+        return { txResult, abortReason };
+      };
+
+      const res1 = await runCreateTx(db1);
+      expect(res1.txResult.committed).toBe(true);
+
+      const res2 = await runCreateTx(db2);
+      expect(res2.txResult.committed).toBe(false);
+      expect(res2.abortReason).toBe('EQUIVALENT');
+
+      const finalSnap = await get(ref(db1, path));
+      expect(finalSnap.val().salePriceCents).toBe(1500);
+      expect(finalSnap.val().version).toBe(1);
+    });
+
+    it('14.12.14: Atualização concorrente baseada na mesma versão base: primeiro incrementa para v2, segundo detecta conflito e aborta', async () => {
+      const db1 = clientAdmin1().database();
+      const db2 = clientAdmin2().database();
+      const path = 'tenants/tenantA/products/p_race_version_1';
+
+      // Cria estado base v1
+      await set(ref(db1, path), {
+        id: 'p_race_version_1',
+        name: 'Item Base',
+        salePriceCents: 1000,
+        version: 1
+      });
+
+      const runUpdateTx = async (db, expectedBase, newPrice) => {
+        let abortReason = null;
+        const txResult = await runTransaction(ref(db, path), (current) => {
+          if (current === null) {
+            // Ciclo preliminar local: propõe mutação com próxima versão para sincronizar com servidor
+            return {
+              id: 'p_race_version_1',
+              name: 'Item Base',
+              salePriceCents: newPrice,
+              baseVersion: expectedBase,
+              version: expectedBase + 1
+            };
+          }
+          if ((current.version || 1) !== expectedBase) {
+            abortReason = 'VERSION_CONFLICT';
+            return undefined;
+          }
+          return {
+            ...current,
+            salePriceCents: newPrice,
+            baseVersion: expectedBase,
+            version: current.version + 1
+          };
+        }, { applyLocally: false });
+        return { txResult, abortReason };
+      };
+
+      // Ambos disparam atualização concorrente esperando baseVersion 1
+      const [res1, res2] = await Promise.all([
+        runUpdateTx(db1, 1, 2000),
+        runUpdateTx(db2, 1, 3000)
+      ]);
+
+      const committedCount = (res1.txResult.committed ? 1 : 0) + (res2.txResult.committed ? 1 : 0);
+      expect(committedCount).toBe(1);
+
+      const uncommitted = res1.txResult.committed ? res2 : res1;
+      expect(uncommitted.abortReason).toBe('VERSION_CONFLICT');
+
+      // Estado final está na versão 2 com o valor do vencedor
+      const finalSnap = await get(ref(db1, path));
+      expect(finalSnap.val().version).toBe(2);
+      const winningPrice = res1.txResult.committed ? 2000 : 3000;
+      expect(finalSnap.val().salePriceCents).toBe(winningPrice);
+    });
+
+    it('14.12.15: Atualização tardia (stale update) após confirmação prévia é rejeitada sem tocar no banco', async () => {
+      const db1 = clientAdmin1().database();
+      const db2 = clientAdmin2().database();
+      const path = 'tenants/tenantA/products/p_stale_upd_1';
+
+      // Record já foi atualizado para v3
+      await set(ref(db1, path), {
+        id: 'p_stale_upd_1',
+        name: 'Item Avançado',
+        salePriceCents: 4000,
+        version: 1
+      });
+      await update(ref(db1, path), {
+        baseVersion: 1,
+        version: 2
+      });
+      await update(ref(db1, path), {
+        baseVersion: 2,
+        version: 3
+      });
+
+      // Cliente 2 envia update baseado na v1 defasada
+      let abortReason = null;
+      const txResult = await runTransaction(ref(db2, path), (current) => {
+        if (!current || (current.version || 1) !== 1) {
+          abortReason = 'VERSION_CONFLICT';
+          return undefined;
+        }
+        return { ...current, salePriceCents: 5000, version: 2 };
+      }, { applyLocally: false });
+
+      expect(txResult.committed).toBe(false);
+      expect(abortReason).toBe('VERSION_CONFLICT');
+
+      const finalSnap = await get(ref(db1, path));
+      expect(finalSnap.val().version).toBe(3);
+      expect(finalSnap.val().salePriceCents).toBe(4000);
+    });
+
+    it('14.12.16: Cliente lê registro v1 e tenta sobrescrever após alteração concorrente: rejeitado atomicamente', async () => {
+      const db1 = clientAdmin1().database();
+      const db2 = clientAdmin2().database();
+      const path = 'tenants/tenantA/products/p_read_modify_write_1';
+
+      await set(ref(db1, path), {
+        id: 'p_read_modify_write_1',
+        name: 'Item Lido',
+        salePriceCents: 1000,
+        version: 1
+      });
+
+      // Cliente 1 lê o registro
+      const snapshotRead = await get(ref(db1, path));
+      const readVersion = snapshotRead.val().version;
+      expect(readVersion).toBe(1);
+
+      // Enquanto cliente 1 prepara mutação, Cliente 2 altera no servidor para v2
+      await update(ref(db2, path), {
+        salePriceCents: 1800,
+        baseVersion: 1,
+        version: 2
+      });
+
+      // Cliente 1 tenta enviar mutação condicional à versão lida (readVersion: 1)
+      let abortReason = null;
+      const txResult = await runTransaction(ref(db1, path), (current) => {
+        if (!current || current.version !== readVersion) {
+          abortReason = 'VERSION_CONFLICT';
+          return undefined;
+        }
+        return { ...current, salePriceCents: 2500, version: readVersion + 1 };
+      }, { applyLocally: false });
+
+      expect(txResult.committed).toBe(false);
+      expect(abortReason).toBe('VERSION_CONFLICT');
+
+      // Estado remoto foi preservado intacto na alteração do cliente 2
+      const finalSnap = await get(ref(db1, path));
+      expect(finalSnap.val().version).toBe(2);
+      expect(finalSnap.val().salePriceCents).toBe(1800);
+    });
+
+    it('14.12.17: Tentativa de transação por tenant incompatível é negada pelas regras de segurança', async () => {
+      const dbB = clientTenantB().database();
+      const path = 'tenants/tenantA/products/p_cross_tenant_tx';
+
+      await assertFails(runTransaction(ref(dbB, path), () => ({
+        id: 'p_cross_tenant_tx',
+        name: 'Injeção Ilegítima',
+        salePriceCents: 9999,
+        version: 1
+      }), { applyLocally: false }));
+    });
+  });
+
+  // =========================================================================
+  // FASE 14.13 — SERVER-SIDE VERSION ENFORCEMENT & DIRECT-WRITE RESISTANCE
+  // =========================================================================
+  describe('PHASE 14.13 — Server-Side Version Enforcement, Direct-Write Resistance & Legacy Mutation Safety', () => {
+    const admin1 = () => testEnv.authenticatedContext('admin_p1413_1', { role: 'authenticated', appRole: 'admin', tenantId: 'tenantA' });
+    const admin2 = () => testEnv.authenticatedContext('admin_p1413_2', { role: 'authenticated', appRole: 'admin', tenantId: 'tenantA' });
+    const operator1 = () => testEnv.authenticatedContext('op_p1413_1', { role: 'authenticated', appRole: 'operator', tenantId: 'tenantA' });
+    const tenantBClient = () => testEnv.authenticatedContext('admin_p1413_b', { role: 'authenticated', appRole: 'admin', tenantId: 'tenantB' });
+
+    it('14.13.1: Criação válida de produto na versão inicial (version: 1) via set() direto', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1413_valid_1';
+      const payload = {
+        id: 'p_p1413_valid_1',
+        name: 'Produto Inicial 14.13',
+        salePriceCents: 1500,
+        version: 1
+      };
+
+      await assertSucceeds(set(ref(db, path), payload));
+      const snap = await get(ref(db, path));
+      expect(snap.exists()).toBe(true);
+      expect(snap.val().version).toBe(1);
+      expect(snap.val().salePriceCents).toBe(1500);
+      expect(snap.val().name).toBe('Produto Inicial 14.13');
+    });
+
+    it('14.13.2: Tentativa de criar novamente registro existente com payload divergente via set() é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1413_dup_create';
+
+      // 1. Criação legítima inicial v1
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1413_dup_create',
+        name: 'Produto Inicial Legítimo',
+        salePriceCents: 1500,
+        version: 1
+      }));
+
+      // 2. Registro já existe em v1. Tentativa de chamar set() com versão inicial 1 e dados divergentes
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1413_dup_create',
+        name: 'Sobrescrita Divergente Ilegítima',
+        salePriceCents: 9999,
+        version: 1
+      }));
+
+      // Estado remoto anterior permaneceu 100% intacto
+      const snap = await get(ref(db, path));
+      expect(snap.val().name).toBe('Produto Inicial Legítimo');
+      expect(snap.val().salePriceCents).toBe(1500);
+      expect(snap.val().version).toBe(1);
+    });
+
+    it('14.13.3: Tentativa de alterar payload mantendo a mesma versão (v1 -> v1) é estritamente rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1413_same_ver';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1413_same_ver',
+        name: 'Produto Original',
+        salePriceCents: 1500,
+        version: 1
+      }));
+
+      // Tentativa de update modificando o preço mas conservando version: 1
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 2500,
+        baseVersion: 1,
+        version: 1
+      }));
+
+      // Tentativa de update modificando apenas campos de negócio sem avançar versão nem baseVersion
+      await assertFails(update(ref(db, path), {
+        name: 'Nome Alterado Mas Mesma Versao'
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().salePriceCents).toBe(1500);
+      expect(snap.val().name).toBe('Produto Original');
+      expect(snap.val().version).toBe(1);
+    });
+
+    it('14.13.4: Tentativa de pular versões (v1 diretamente para v3) é categoricamente rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1413_jump_ver';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1413_jump_ver',
+        name: 'Produto Base',
+        salePriceCents: 1500,
+        version: 1
+      }));
+
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 2000,
+        baseVersion: 1,
+        version: 3
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(1);
+      expect(snap.val().salePriceCents).toBe(1500);
+    });
+
+    it('14.13.5: Atualização canônica com baseVersion correspondente e incremento exato (v1 -> v2) é aceita', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1413_canonical_upd';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1413_canonical_upd',
+        name: 'Produto Base',
+        salePriceCents: 1500,
+        version: 1
+      }));
+
+      await assertSucceeds(update(ref(db, path), {
+        salePriceCents: 2200,
+        name: 'Produto Atualizado v2',
+        baseVersion: 1,
+        version: 2
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(2);
+      expect(snap.val().baseVersion).toBe(1);
+      expect(snap.val().salePriceCents).toBe(2200);
+      expect(snap.val().name).toBe('Produto Atualizado v2');
+    });
+
+    it('14.13.6: Atualização com baseVersion obsoleta é rejeitada (proteção contra conflito concorrente tardio)', async () => {
+      const db = admin2().database();
+      const path = 'tenants/tenantA/products/p_p1413_stale_ver';
+
+      await assertSucceeds(set(ref(admin1().database(), path), {
+        id: 'p_p1413_stale_ver',
+        name: 'Produto em v2',
+        salePriceCents: 2200,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(admin1().database(), path), {
+        baseVersion: 1,
+        version: 2
+      }));
+
+      // Registro remoto está em v2. Cliente tenta enviar mutação informando baseVersion: 1
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 3500,
+        baseVersion: 1,
+        version: 3
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(2);
+      expect(snap.val().salePriceCents).toBe(2200);
+    });
+
+    it('14.13.7: Atualização com baseVersion arbitrariamente superior é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1413_future_ver';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1413_future_ver',
+        name: 'Produto em v2',
+        salePriceCents: 2200,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(db, path), {
+        baseVersion: 1,
+        version: 2
+      }));
+
+      // Remoto está em v2. Cliente tenta baseVersion fictícia 99
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 4500,
+        baseVersion: 99,
+        version: 100
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(2);
+      expect(snap.val().salePriceCents).toBe(2200);
+    });
+
+    it('14.13.8: Tentativa de alterar a identidade (id) do produto existente na atualização é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1413_id_immut';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1413_id_immut',
+        name: 'Produto em v2',
+        salePriceCents: 2200,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(db, path), {
+        baseVersion: 1,
+        version: 2
+      }));
+
+      await assertFails(update(ref(db, path), {
+        id: 'p_p1413_tampered_id',
+        baseVersion: 2,
+        version: 3
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().id).toBe('p_p1413_id_immut');
+      expect(snap.val().version).toBe(2);
+    });
+
+    it('14.13.9: Atualização direta com tenant incompatível é categoricamente negada', async () => {
+      const dbAdmin = admin1().database();
+      const dbB = tenantBClient().database();
+      const path = 'tenants/tenantA/products/p_p1413_cross_tenant';
+
+      await assertSucceeds(set(ref(dbAdmin, path), {
+        id: 'p_p1413_cross_tenant',
+        name: 'Produto Tenant A',
+        salePriceCents: 2200,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(dbAdmin, path), {
+        baseVersion: 1,
+        version: 2
+      }));
+
+      await assertFails(update(ref(dbB, path), {
+        salePriceCents: 9999,
+        baseVersion: 2,
+        version: 3
+      }));
+
+      const snap = await get(ref(dbAdmin, path));
+      expect(snap.val().version).toBe(2);
+      expect(snap.val().salePriceCents).toBe(2200);
+    });
+
+    it('14.13.10: Tentativa de retroceder versão (v2 -> v1) é estritamente rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1413_regress';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1413_regress',
+        name: 'Produto em v2',
+        salePriceCents: 2200,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(db, path), {
+        baseVersion: 1,
+        version: 2
+      }));
+
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 1100,
+        baseVersion: 2,
+        version: 1
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(2);
+      expect(snap.val().salePriceCents).toBe(2200);
+    });
+
+    it('14.13.11: Movimento de estoque no ledger append-only não pode ser sobrescrito nem removido', async () => {
+      const db = operator1().database();
+      const movPath = 'tenants/tenantA/inventory/mov_p1413_strict_ledger';
+      const movData = {
+        id: 'mov_p1413_strict_ledger',
+        productId: 'p_prod_ledger_ref',
+        quantity: 10,
+        delta: 10,
+        type: 'IN',
+        date: '2026-10-12'
+      };
+
+      // Criação legítima no ledger append-only
+      await assertSucceeds(set(ref(db, movPath), movData));
+
+      // Tentativa de sobrescrever via set()
+      await assertFails(set(ref(db, movPath), {
+        ...movData,
+        quantity: 20,
+        delta: 20
+      }));
+
+      // Tentativa de modificar via update()
+      await assertFails(update(ref(db, movPath), {
+        quantity: 99,
+        delta: 99
+      }));
+
+      // Tentativa de remover via remove()
+      await assertFails(remove(ref(db, movPath)));
+
+      const snap = await get(ref(db, movPath));
+      expect(snap.exists()).toBe(true);
+      expect(snap.val().quantity).toBe(10);
+      expect(snap.val().delta).toBe(10);
+    });
+
+    it('14.13.12: Vendas: campos comerciais imutáveis não podem ser alterados e remoção física é proibida', async () => {
+      const db = operator1().database();
+      const salePath = 'tenants/tenantA/sales/sale_p1413_strict';
+      const saleData = {
+        id: 'sale_p1413_strict',
+        productId: 'p_prod_sale_ref',
+        quantity: 2,
+        totalSaleCents: 4400,
+        unitSalePriceCents: 2200,
+        unitCostCents: 1000,
+        date: '2026-10-12T09:00:00Z'
+      };
+
+      // 1. Criação válida de venda
+      await assertSucceeds(set(ref(db, salePath), saleData));
+
+      // 2. Tentativa de alterar totalSaleCents (fraude de valor)
+      await assertFails(update(ref(db, salePath), {
+        totalSaleCents: 100
+      }));
+
+      // 3. Tentativa de alterar quantidade
+      await assertFails(update(ref(db, salePath), {
+        quantity: 10
+      }));
+
+      // 4. Tentativa de alterar unitSalePriceCents ou unitCostCents
+      await assertFails(update(ref(db, salePath), {
+        unitSalePriceCents: 50
+      }));
+
+      // 5. Tentativa de alterar data
+      await assertFails(update(ref(db, salePath), {
+        date: '2025-01-01T00:00:00Z'
+      }));
+
+      // 6. Tentativa de exclusão física via remove()
+      await assertFails(remove(ref(db, salePath)));
+
+      // 7. Atualização comercial permitida: cancelamento/estorno com registro de motivo
+      await assertSucceeds(update(ref(db, salePath), {
+        cancelledAt: '2026-10-12T10:00:00Z',
+        cancelReason: 'Desistência do cliente',
+        notes: 'Estorno aprovado'
+      }));
+
+      // Estado final confirma imutabilidade dos campos financeiros
+      const snap = await get(ref(db, salePath));
+      expect(snap.val().totalSaleCents).toBe(4400);
+      expect(snap.val().quantity).toBe(2);
+      expect(snap.val().cancelledAt).toBe('2026-10-12T10:00:00Z');
+      expect(snap.val().cancelReason).toBe('Desistência do cliente');
+    });
+
+    it('14.13.13: Compras: campos comerciais imutáveis não podem ser alterados e remoção física é proibida', async () => {
+      const db = admin1().database();
+      const purPath = 'tenants/tenantA/purchases/pur_p1413_strict';
+      const purData = {
+        id: 'pur_p1413_strict',
+        productId: 'p_prod_pur_ref',
+        supplierId: 'sup_p1413_1',
+        quantity: 50,
+        totalAmountCents: 50000,
+        date: '2026-10-12T08:00:00Z'
+      };
+
+      // 1. Criação de compra (exclusiva de admin)
+      await assertSucceeds(set(ref(db, purPath), purData));
+
+      // 2. Tentativa de alterar totalAmountCents
+      await assertFails(update(ref(db, purPath), {
+        totalAmountCents: 1000
+      }));
+
+      // 3. Tentativa de alterar productId ou quantity
+      await assertFails(update(ref(db, purPath), {
+        productId: 'another_product'
+      }));
+      await assertFails(update(ref(db, purPath), {
+        quantity: 5
+      }));
+
+      // 4. Tentativa de remoção física via remove()
+      await assertFails(remove(ref(db, purPath)));
+
+      // 5. Atualização comercial permitida: cancelamento/estorno
+      await assertSucceeds(update(ref(db, purPath), {
+        cancelledAt: '2026-10-12T11:00:00Z',
+        cancelReason: 'Erro na nota fiscal de entrada'
+      }));
+
+      const snap = await get(ref(db, purPath));
+      expect(snap.val().totalAmountCents).toBe(50000);
+      expect(snap.val().quantity).toBe(50);
+      expect(snap.val().cancelledAt).toBe('2026-10-12T11:00:00Z');
+    });
+
+    it('14.13.14: Atualização de produto legada sem baseVersion é rejeitada pelo servidor', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1413_no_basever';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1413_no_basever',
+        name: 'Produto em v2',
+        salePriceCents: 2200,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(db, path), {
+        baseVersion: 1,
+        version: 2
+      }));
+
+      // Produto está na v2. Cliente legado envia mutação contendo version: 3 mas sem baseVersion
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 2600,
+        version: 3
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(2);
+      expect(snap.val().salePriceCents).toBe(2200);
+    });
+
+    it('14.13.15: Tentativa de gravação em nós ancestrais ou múltiplos caminhos é bloqueada', async () => {
+      const db = admin1().database();
+
+      // Gravação direta no nó ancestral /tenants/tenantA
+      await assertFails(set(ref(db, 'tenants/tenantA'), {
+        hacked: true
+      }));
+
+      // Gravação no nó /tenants/tenantA/products diretamente
+      await assertFails(set(ref(db, 'tenants/tenantA/products'), {
+        p_all_hacked: { name: 'Root Override' }
+      }));
+
+      // Multi-path update no caminho ancestral
+      await assertFails(update(ref(db, 'tenants/tenantA'), {
+        'products/p_multipath_hack/name': 'Bypass'
+      }));
+    });
+
+    it('14.13.16: Tentativa de exclusão física de produto por operador é rejeitada pelas regras', async () => {
+      const adminDb = admin1().database();
+      const opDb = operator1().database();
+      const path = 'tenants/tenantA/products/p_p1413_op_del';
+
+      // Seed produto legítimo via admin
+      await assertSucceeds(set(ref(adminDb, path), {
+        id: 'p_p1413_op_del',
+        name: 'Produto Teste Delecao',
+        salePriceCents: 2000,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(adminDb, path), {
+        baseVersion: 1,
+        version: 2
+      }));
+
+      // Operador tenta physical remove()
+      await assertFails(remove(ref(opDb, path)));
+
+      // Produto permanece preservado
+      const snap = await get(ref(adminDb, path));
+      expect(snap.exists()).toBe(true);
+      expect(snap.val().version).toBe(2);
+    });
+
+    it('14.13.17: Exclusão lógica canônica via update com deletedAt incrementa versão e mantém registro seguro', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1413_soft_del';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1413_soft_del',
+        name: 'Produto para Soft Delete',
+        salePriceCents: 2000,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(db, path), {
+        baseVersion: 1,
+        version: 2
+      }));
+
+      // Soft delete canônico: preserva registro com deletedAt, baseVersion: 2, version: 3
+      await assertSucceeds(update(ref(db, path), {
+        deletedAt: new Date().toISOString(),
+        baseVersion: 2,
+        version: 3
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.exists()).toBe(true);
+      expect(snap.val().version).toBe(3);
+      expect(snap.val().baseVersion).toBe(2);
+      expect(snap.val().deletedAt).toBeDefined();
+    });
+
+    it('14.13.18: Disputa concorrente entre dois clientes autorizados na mesma versão: exatamente um vence e o segundo falha', async () => {
+      const db1 = admin1().database();
+      const db2 = admin2().database();
+      const path = 'tenants/tenantA/products/p_p1413_race_direct';
+
+      // Cria produto v1
+      await set(ref(db1, path), {
+        id: 'p_p1413_race_direct',
+        name: 'Item Race Direct',
+        salePriceCents: 1000,
+        version: 1
+      });
+
+      // Cliente 1 e Cliente 2 tentam avançar concorrentemente de baseVersion: 1 para version: 2
+      const updateClient = async (db, price) => {
+        let abortReason = null;
+        const txResult = await runTransaction(ref(db, path), (current) => {
+          if (current === null) {
+            return {
+              id: 'p_p1413_race_direct',
+              name: 'Item Race Direct',
+              salePriceCents: price,
+              baseVersion: 1,
+              version: 2
+            };
+          }
+          if (current.version !== 1) {
+            abortReason = 'VERSION_CONFLICT';
+            return undefined;
+          }
+          return {
+            ...current,
+            salePriceCents: price,
+            baseVersion: 1,
+            version: 2
+          };
+        }, { applyLocally: false });
+        return { txResult, abortReason };
+      };
+
+      const [res1, res2] = await Promise.all([
+        updateClient(db1, 2000),
+        updateClient(db2, 3000)
+      ]);
+
+      const committedCount = (res1.txResult.committed ? 1 : 0) + (res2.txResult.committed ? 1 : 0);
+      expect(committedCount).toBe(1);
+
+      const rejected = res1.txResult.committed ? res2 : res1;
+      expect(rejected.abortReason).toBe('VERSION_CONFLICT');
+
+      // Estado remoto está exatamente na versão 2 com o valor vencedor
+      const finalSnap = await get(ref(db1, path));
+      expect(finalSnap.val().version).toBe(2);
+      expect(finalSnap.val().baseVersion).toBe(1);
+      const winningPrice = res1.txResult.committed ? 2000 : 3000;
+      expect(finalSnap.val().salePriceCents).toBe(winningPrice);
+
+      // Agora, o cliente perdedor (ou qualquer outro) tentando aplicar mutação com a v1 antiga é rejeitado pelo servidor
+      await assertFails(update(ref(db2, path), {
+        salePriceCents: 9999,
+        baseVersion: 1,
+        version: 2
+      }));
+    });
+  });
+
+  describe('PHASE 14.14 — End-to-End Version Contract, Legacy Bootstrap & BaseVersion Integrity', () => {
+    const admin1 = () => testEnv.authenticatedContext('admin_p1414_1', {
+      role: 'authenticated',
+      appRole: 'admin',
+      tenantId: 'tenantA'
+    });
+
+    const admin2 = () => testEnv.authenticatedContext('admin_p1414_2', {
+      role: 'authenticated',
+      appRole: 'admin',
+      tenantId: 'tenantA'
+    });
+
+    it('14.14.1: Validação de escopo: regras de produto avaliadas no caminho $productId e bloqueiam escritas em nós ancestrais', async () => {
+      const db = admin1().database();
+      await assertFails(set(ref(db, 'tenants/tenantA'), { hacker: true }));
+      await assertFails(set(ref(db, 'tenants/tenantA/products'), { p1: { name: 'Hack' } }));
+    });
+
+    it('14.14.2: Criação de produto: version: 1 com baseVersion: 0 (ou ausente) é aceita', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_create_v1';
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1414_create_v1',
+        name: 'Produto Inicial v1',
+        salePriceCents: 1500,
+        version: 1,
+        baseVersion: 0
+      }));
+      const snap = await get(ref(db, path));
+      expect(snap.exists()).toBe(true);
+      expect(snap.val().version).toBe(1);
+      expect(snap.val().baseVersion).toBe(0);
+    });
+
+    it('14.14.3: Criação de produto: versão inválida (version: 0, negativa ou string) é estritamente rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_invalid_ver';
+
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1414_invalid_ver',
+        name: 'Produto Invalido',
+        salePriceCents: 1500,
+        version: 0
+      }));
+
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1414_invalid_ver',
+        name: 'Produto Invalido',
+        salePriceCents: 1500,
+        version: -1
+      }));
+
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1414_invalid_ver',
+        name: 'Produto Invalido',
+        salePriceCents: 1500,
+        version: '1'
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.exists()).toBe(false);
+    });
+
+    it('14.14.4: Criação de produto: versão fracionária (version: 1.5) é rejeitada pelo backend', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_frac_ver';
+
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1414_frac_ver',
+        name: 'Produto Fracionario',
+        salePriceCents: 1500,
+        version: 1.5
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.exists()).toBe(false);
+    });
+
+    it('14.14.5: Criação de produto: salto inicial (version: 2 em nó novo) é rejeitado pelo servidor', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_skip_create';
+
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1414_skip_create',
+        name: 'Produto Salto Inicial',
+        salePriceCents: 1500,
+        version: 2
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.exists()).toBe(false);
+    });
+
+    it('14.14.6: Criação de produto: baseVersion inconsistente (baseVersion: 5 ou baseVersion: 1 em nó novo) é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_inconsistent_base';
+
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1414_inconsistent_base',
+        name: 'Produto Base Inconsistente',
+        salePriceCents: 1500,
+        version: 1,
+        baseVersion: 5
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.exists()).toBe(false);
+    });
+
+    it('14.14.7: Sequência contínua completa: progressão rigorosa v1 -> v2 -> v3 -> v4 é aceita', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_seq_full';
+
+      // v1
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1414_seq_full',
+        name: 'Item Seq v1',
+        salePriceCents: 1000,
+        version: 1
+      }));
+      let snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(1);
+
+      // v1 -> v2
+      await assertSucceeds(update(ref(db, path), {
+        salePriceCents: 2000,
+        baseVersion: 1,
+        version: 2
+      }));
+      snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(2);
+      expect(snap.val().baseVersion).toBe(1);
+      expect(snap.val().salePriceCents).toBe(2000);
+
+      // v2 -> v3
+      await assertSucceeds(update(ref(db, path), {
+        salePriceCents: 3000,
+        baseVersion: 2,
+        version: 3
+      }));
+      snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(3);
+      expect(snap.val().baseVersion).toBe(2);
+      expect(snap.val().salePriceCents).toBe(3000);
+
+      // v3 -> v4
+      await assertSucceeds(update(ref(db, path), {
+        salePriceCents: 4000,
+        baseVersion: 3,
+        version: 4
+      }));
+      snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(4);
+      expect(snap.val().baseVersion).toBe(3);
+      expect(snap.val().salePriceCents).toBe(4000);
+    });
+
+    it('14.14.8: Rejeição na sequência: estando em v2, salto para v4 (baseVersion: 2, version: 4) é rejeitado e preserva v2', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_seq_jump';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1414_seq_jump',
+        name: 'Item Jump',
+        salePriceCents: 1000,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(db, path), {
+        baseVersion: 1,
+        version: 2
+      }));
+
+      // Tenta pular para v4
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 9999,
+        baseVersion: 2,
+        version: 4
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(2);
+      expect(snap.val().salePriceCents).toBe(1000);
+    });
+
+    it('14.14.9: Rejeição na sequência: estando em v3, baseVersion obsoleto (baseVersion: 1) é rejeitado e preserva v3', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_seq_stale';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1414_seq_stale',
+        name: 'Item Stale',
+        salePriceCents: 1000,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(db, path), { baseVersion: 1, version: 2 }));
+      await assertSucceeds(update(ref(db, path), { baseVersion: 2, version: 3 }));
+
+      // Tenta usar baseVersion 1 quando o servidor está em v3
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 9999,
+        baseVersion: 1,
+        version: 4
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(3);
+    });
+
+    it('14.14.10: Tipagem na atualização: baseVersion ou version textual é rejeitado pelo servidor', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_type_str';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1414_type_str',
+        name: 'Item Str',
+        salePriceCents: 1000,
+        version: 1
+      }));
+
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 2000,
+        baseVersion: '1',
+        version: 2
+      }));
+
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 2000,
+        baseVersion: 1,
+        version: '2'
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(1);
+    });
+
+    it('14.14.11: Tipagem na atualização: baseVersion ou version fracionário (ex: 1.5, 2.5) é rejeitado', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_type_frac';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1414_type_frac',
+        name: 'Item Frac',
+        salePriceCents: 1000,
+        version: 1
+      }));
+
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 2000,
+        baseVersion: 1.5,
+        version: 2.5
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(1);
+    });
+
+    it('14.14.12: Registro legado sem version: tentativa de saltar para versão arbitrária (version: 10 ou 50) é categoricamente rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_leg_skip';
+
+      // Seed de registro legado sem campo version via admin fixture
+      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
+        await set(ref(adminCtx.database(), path), {
+          id: 'p_p1414_leg_skip',
+          name: 'Item Legado Sem Versao',
+          salePriceCents: 1000
+        });
+      });
+
+      // Tentativa de saltar para version: 10
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 2000,
+        version: 10,
+        baseVersion: 1
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBeUndefined();
+      expect(snap.val().salePriceCents).toBe(1000);
+    });
+
+    it('14.14.13: Registro legado sem version: tentativa de atualização com baseVersion arbitrário (baseVersion: 99) é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_leg_arb_base';
+
+      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
+        await set(ref(adminCtx.database(), path), {
+          id: 'p_p1414_leg_arb_base',
+          name: 'Item Legado Arb Base',
+          salePriceCents: 1000
+        });
+      });
+
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 2000,
+        baseVersion: 99,
+        version: 2
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBeUndefined();
+    });
+
+    it('14.14.14: Registro legado sem version: tentativa de atualizar para version: 2 sem baseVersion é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_leg_no_base';
+
+      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
+        await set(ref(adminCtx.database(), path), {
+          id: 'p_p1414_leg_no_base',
+          name: 'Item Legado No Base',
+          salePriceCents: 1000
+        });
+      });
+
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 2000,
+        version: 2
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBeUndefined();
+    });
+
+    it('14.14.15: Registro legado sem version: mutação e bootstrap por cliente comum são categoricamente rejeitados', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1414_leg_canon';
+
+      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
+        await set(ref(adminCtx.database(), path), {
+          id: 'p_p1414_leg_canon',
+          name: 'Item Legado Canonico',
+          salePriceCents: 1000
+        });
+      });
+
+      // Tentativa de bootstrap por cliente é rejeitada pelo backend
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 1500,
+        baseVersion: 1,
+        version: 2
+      }));
+
+      // Tentativa de mutação comercial sem version é rejeitada
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 1200
+      }));
+
+      // Registro permanece íntegro no estado original
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBeUndefined();
+      expect(snap.val().salePriceCents).toBe(1000);
+      expect(snap.val().name).toBe('Item Legado Canonico');
+    });
+
+    it('14.14.16: Registro legado sem version: mutação concorrente por clientes é rejeitada e preserva registro intacto', async () => {
+      const db1 = admin1().database();
+      const db2 = admin2().database();
+      const path = 'tenants/tenantA/products/p_p1414_leg_race';
+
+      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
+        await set(ref(adminCtx.database(), path), {
+          id: 'p_p1414_leg_race',
+          name: 'Item Legado Race',
+          salePriceCents: 1000
+        });
+      });
+
+      // Ambos os clientes tentam mutação sobre o nó legado: ambos são rejeitados pelo servidor
+      await assertFails(update(ref(db1, path), {
+        salePriceCents: 1500,
+        baseVersion: 1,
+        version: 2
+      }));
+      await assertFails(update(ref(db2, path), {
+        salePriceCents: 2500,
+        baseVersion: 1,
+        version: 2
+      }));
+
+      const finalSnap = await get(ref(db1, path));
+      expect(finalSnap.val().version).toBeUndefined();
+      expect(finalSnap.val().salePriceCents).toBe(1000);
+      expect(finalSnap.val().name).toBe('Item Legado Race');
+    });
+
+    it('14.14.17: Imutabilidade financeira em Vendas: alteração em unitSalePriceCents ou date é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/sales/sale_p1414_strict';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'sale_p1414_strict',
+        productId: 'prod_1414_s',
+        quantity: 2,
+        totalSaleCents: 4000,
+        unitSalePriceCents: 2000,
+        unitCostCents: 1000,
+        date: '2026-10-12T10:00:00Z'
+      }));
+
+      await assertFails(update(ref(db, path), { unitSalePriceCents: 2500 }));
+      await assertFails(update(ref(db, path), { date: '2026-10-15T00:00:00Z' }));
+
+      // Cancelamento permitido
+      await assertSucceeds(update(ref(db, path), {
+        cancelledAt: '2026-10-12T12:00:00Z',
+        cancelReason: 'Desistência do cliente'
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().unitSalePriceCents).toBe(2000);
+      expect(snap.val().totalSaleCents).toBe(4000);
+      expect(snap.val().cancelledAt).toBe('2026-10-12T12:00:00Z');
+    });
+
+    it('14.14.18: Imutabilidade financeira em Compras: alteração em supplierId ou totalAmountCents é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/purchases/pur_p1414_strict';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'pur_p1414_strict',
+        productId: 'prod_1414_p',
+        supplierId: 'sup_1414_orig',
+        quantity: 10,
+        totalAmountCents: 10000,
+        date: '2026-10-12T08:00:00Z'
+      }));
+
+      await assertFails(update(ref(db, path), { supplierId: 'sup_1414_hacked' }));
+      await assertFails(update(ref(db, path), { totalAmountCents: 99999 }));
+
+      // Cancelamento permitido
+      await assertSucceeds(update(ref(db, path), {
+        cancelledAt: '2026-10-12T12:00:00Z',
+        cancelReason: 'Devolução ao fornecedor'
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().supplierId).toBe('sup_1414_orig');
+      expect(snap.val().totalAmountCents).toBe(10000);
+      expect(snap.val().cancelledAt).toBe('2026-10-12T12:00:00Z');
+    });
+
+    it('14.14.19: Ledger de Estoque (/inventory): update parcial em notas ou campos descritivos é estritamente rejeitado', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/inventory/mov_p1414_ledger';
+
+      await assertSucceeds(set(ref(db, path), {
+        id: 'mov_p1414_ledger',
+        productId: 'p_p1414_seq_full',
+        quantity: 10,
+        delta: 10,
+        type: 'IN',
+        notes: 'Entrada Inicial'
+      }));
+
+      await assertFails(update(ref(db, path), { notes: 'Tentativa de alteração descritiva' }));
+      await assertFails(update(ref(db, path), { quantity: 15 }));
+      await assertFails(remove(ref(db, path)));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().notes).toBe('Entrada Inicial');
+      expect(snap.val().quantity).toBe(10);
+    });
+
+    it('14.14.20: Paridade de Provedor: MockRealtimeProvider detecta conflito de versão e preserva registro intacto', async () => {
+      const mock = new MockRealtimeProvider();
+      mock.setConnected(true);
+
+      mock._getStore('products').set('prod_mock_1', {
+        id: 'prod_mock_1',
+        name: 'Mock Prod',
+        salePriceCents: 1000,
+        version: 2,
+        baseVersion: 1
+      });
+
+      let thrownError = null;
+      try {
+        await mock.pushChange({
+          entityType: 'products',
+          entityId: 'prod_mock_1',
+          action: 'UPDATE',
+          payload: {
+            salePriceCents: 2000,
+            baseVersion: 1,
+            version: 3
+          }
+        });
+      } catch (err) {
+        thrownError = err;
+      }
+
+      expect(thrownError).toBeDefined();
+      expect(thrownError.code).toBe('concurrency_conflict');
+      expect(thrownError.errorCategory).toBe('version_conflict');
+
+      const stored = mock._getStore('products').get('prod_mock_1');
+      expect(stored.version).toBe(2);
+      expect(stored.salePriceCents).toBe(1000);
+    });
+
+    it('14.14.21: Idempotência de Provedor: reenvio de operação equivalente retorna alreadyApplied: true em MockRealtimeProvider', async () => {
+      const mock = new MockRealtimeProvider();
+      mock.setConnected(true);
+
+      mock._getStore('products').set('prod_mock_2', {
+        id: 'prod_mock_2',
+        name: 'Mock Prod Idemp',
+        salePriceCents: 3000,
+        version: 2,
+        baseVersion: 1
+      });
+
+      const res = await mock.pushChange({
+        entityType: 'products',
+        entityId: 'prod_mock_2',
+        action: 'UPDATE',
+        payload: {
+          id: 'prod_mock_2',
+          name: 'Mock Prod Idemp',
+          salePriceCents: 3000,
+          baseVersion: 1,
+          version: 2
+        }
+      });
+
+      expect(res.success).toBe(true);
+      expect(res.alreadyApplied).toBe(true);
+    });
+  });
+
+  // =========================================================================
+  // PHASE 14.15 — FECHAMENTO DAS BRECHAS DE VERSIONAMENTO, CAS E PROTEÇÃO CONTRA ESCRITAS DIRETAS
+  // =========================================================================
+  describe('PHASE 14.15 — Fechamento das Brechas de Versionamento, CAS e Proteção contra Escritas Diretas', () => {
+    const admin1 = () => testEnv.authenticatedContext('admin_p1415_1', { role: 'authenticated', appRole: 'admin', tenantId: 'tenantA' });
+    const admin2 = () => testEnv.authenticatedContext('admin_p1415_2', { role: 'authenticated', appRole: 'admin', tenantId: 'tenantA' });
+    const operator1 = () => testEnv.authenticatedContext('op_p1415_1', { role: 'authenticated', appRole: 'operator', tenantId: 'tenantA' });
+    const viewer1 = () => testEnv.authenticatedContext('view_p1415_1', { role: 'authenticated', appRole: 'viewer', tenantId: 'tenantA' });
+    const tenantBClient = () => testEnv.authenticatedContext('admin_p1415_b', { role: 'authenticated', appRole: 'admin', tenantId: 'tenantB' });
+
+    // -------------------------------------------------------------
+    // GRUPO 1: CRIAÇÃO E FECHAMENTO DE BRECHAS DE VERSIONAMENTO
+    // -------------------------------------------------------------
+    it('14.15.1: Criação de produto com version: 1 e baseVersion omitido ou 0 é aceita com sucesso', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_create_valid';
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1415_create_valid',
+        name: 'Produto Valido 14.15',
+        salePriceCents: 1500,
+        version: 1
+      }));
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(1);
+    });
+
+    it('14.15.2: Criação de produto sem version (omissão do campo) é categoricamente rejeitada pelo servidor', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_no_ver';
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1415_no_ver',
+        name: 'Produto Sem Version',
+        salePriceCents: 1500
+      }));
+      const snap = await get(ref(db, path));
+      expect(snap.exists()).toBe(false);
+    });
+
+    it('14.15.3: Criação de produto com version: null é categoricamente rejeitada pelo servidor', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_null_ver';
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1415_null_ver',
+        name: 'Produto Null Version',
+        salePriceCents: 1500,
+        version: null
+      }));
+      const snap = await get(ref(db, path));
+      expect(snap.exists()).toBe(false);
+    });
+
+    it('14.15.4: Criação de produto com version: 0, negativo, fracionário ou textual é rejeitada', async () => {
+      const db = admin1().database();
+      const path0 = 'tenants/tenantA/products/p_p1415_v0';
+      const pathNeg = 'tenants/tenantA/products/p_p1415_vneg';
+      const pathFrac = 'tenants/tenantA/products/p_p1415_vfrac';
+      const pathStr = 'tenants/tenantA/products/p_p1415_vstr';
+
+      await assertFails(set(ref(db, path0), { id: 'p_p1415_v0', name: 'V0', salePriceCents: 100, version: 0 }));
+      await assertFails(set(ref(db, pathNeg), { id: 'p_p1415_vneg', name: 'VNeg', salePriceCents: 100, version: -1 }));
+      await assertFails(set(ref(db, pathFrac), { id: 'p_p1415_vfrac', name: 'VFrac', salePriceCents: 100, version: 1.5 }));
+      await assertFails(set(ref(db, pathStr), { id: 'p_p1415_vstr', name: 'VStr', salePriceCents: 100, version: '1' }));
+    });
+
+    it('14.15.5: Criação com salto de versão (version: 2 ou superior) é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_jump_init';
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1415_jump_init',
+        name: 'Salto Inicial',
+        salePriceCents: 200,
+        version: 2
+      }));
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1415_jump_init',
+        name: 'Salto Inicial 10',
+        salePriceCents: 200,
+        version: 10
+      }));
+    });
+
+    it('14.15.6: Criação com baseVersion inconsistente (baseVersion: 1, -1, 1.5 ou string) é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_inconsistent_base';
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1415_inconsistent_base',
+        name: 'Base Inconsistente',
+        salePriceCents: 300,
+        version: 1,
+        baseVersion: 1
+      }));
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1415_inconsistent_base',
+        name: 'Base Inconsistente Neg',
+        salePriceCents: 300,
+        version: 1,
+        baseVersion: -1
+      }));
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1415_inconsistent_base',
+        name: 'Base Inconsistente Str',
+        salePriceCents: 300,
+        version: 1,
+        baseVersion: '0'
+      }));
+    });
+
+    it('14.15.7: Criação com id divergente da chave ou com tenantId de outro tenant é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_id_mismatch';
+      await assertFails(set(ref(db, path), {
+        id: 'p_divergent_id',
+        name: 'ID Divergente',
+        salePriceCents: 400,
+        version: 1
+      }));
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1415_id_mismatch',
+        name: 'Tenant Divergente',
+        salePriceCents: 400,
+        tenantId: 'tenantB',
+        version: 1
+      }));
+    });
+
+    // -------------------------------------------------------------
+    // GRUPO 2: ATUALIZAÇÃO E REMOÇÃO DE CAMPOS DE VERSIONAMENTO
+    // -------------------------------------------------------------
+    it('14.15.8: Atualização de produto versionado removendo version com update({ version: null }) é categoricamente rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_rm_ver';
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1415_rm_ver',
+        name: 'Produto Base Para Nulificar Versao',
+        salePriceCents: 1000,
+        version: 1
+      }));
+
+      await assertFails(update(ref(db, path), {
+        version: null,
+        baseVersion: 1
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(1);
+    });
+
+    it('14.15.9: Atualização que remove somente baseVersion (update({ baseVersion: null })) é categoricamente rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_rm_basever';
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1415_rm_basever',
+        name: 'Produto Para Nulificar BaseVersion',
+        salePriceCents: 1000,
+        version: 1
+      }));
+
+      await assertFails(update(ref(db, path), {
+        version: 2,
+        baseVersion: null
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(1);
+    });
+
+    it('14.15.10: Atualização que remove simultaneamente campos de versionamento ({ version: null, baseVersion: null }) é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_rm_both';
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1415_rm_both',
+        name: 'Produto Nulificar Ambos',
+        salePriceCents: 1000,
+        version: 1
+      }));
+
+      await assertFails(update(ref(db, path), {
+        version: null,
+        baseVersion: null
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(1);
+    });
+
+    it('14.15.11: Escrita de objeto completo via set() com version ausente ou nulo sobre nó versionado é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_set_nover';
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1415_set_nover',
+        name: 'Original v1',
+        salePriceCents: 1000,
+        version: 1
+      }));
+
+      await assertFails(set(ref(db, path), {
+        id: 'p_p1415_set_nover',
+        name: 'Hacked Sem Versao',
+        salePriceCents: 9999
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(1);
+      expect(snap.val().salePriceCents).toBe(1000);
+      expect(snap.val().name).toBe('Original v1');
+    });
+
+    it('14.15.12: Sequência contínua válida v1 -> v2 -> v3 é aceita; tentativas de salto (v1 -> v3), retrocesso (v2 -> v1) ou mesma versão (v2 -> v2) são rejeitadas', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_seq_strict';
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1415_seq_strict',
+        name: 'Seq Inicial',
+        salePriceCents: 1000,
+        version: 1
+      }));
+
+      // Tentativa de salto v1 -> v3 rejeitada
+      await assertFails(update(ref(db, path), { salePriceCents: 1100, baseVersion: 1, version: 3 }));
+
+      // Avanço legítimo v1 -> v2
+      await assertSucceeds(update(ref(db, path), { salePriceCents: 1200, baseVersion: 1, version: 2 }));
+
+      // Tentativa de mesma versão com conteúdo alterado (v2 -> v2) rejeitada
+      await assertFails(update(ref(db, path), { salePriceCents: 1300, baseVersion: 2, version: 2 }));
+
+      // Tentativa de retrocesso (v2 -> v1) rejeitada
+      await assertFails(update(ref(db, path), { salePriceCents: 1400, baseVersion: 2, version: 1 }));
+
+      // Avanço legítimo v2 -> v3
+      await assertSucceeds(update(ref(db, path), { salePriceCents: 1500, baseVersion: 2, version: 3 }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(3);
+      expect(snap.val().baseVersion).toBe(2);
+      expect(snap.val().salePriceCents).toBe(1500);
+    });
+
+    it('14.15.13: Atualização com baseVersion obsoleto é rejeitada e preserva o estado mais recente', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_stale_base';
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1415_stale_base',
+        name: 'Item Stale Test',
+        salePriceCents: 1000,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(db, path), {
+        salePriceCents: 2000,
+        baseVersion: 1,
+        version: 2
+      }));
+
+      // Estando em v2, cliente com baseVersion 1 tentando ir para v3 é rejeitado
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 3000,
+        baseVersion: 1,
+        version: 3
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBe(2);
+      expect(snap.val().salePriceCents).toBe(2000);
+    });
+
+    it('14.15.14: Atualização tentando alterar id ou tenantId do produto é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_immut';
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1415_immut',
+        name: 'Item Imutavel',
+        salePriceCents: 1000,
+        tenantId: 'tenantA',
+        version: 1
+      }));
+
+      await assertFails(update(ref(db, path), {
+        id: 'p_p1415_id_hacked',
+        baseVersion: 1,
+        version: 2
+      }));
+      await assertFails(update(ref(db, path), {
+        tenantId: 'tenantB',
+        baseVersion: 1,
+        version: 2
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().id).toBe('p_p1415_immut');
+      expect(snap.val().tenantId).toBe('tenantA');
+    });
+
+    // -------------------------------------------------------------
+    // GRUPO 3: REGISTROS LEGADOS NÃO VERSIONADOS
+    // -------------------------------------------------------------
+    it('14.15.15: Fixture legada não versionada: edição comercial irrestrita por cliente comum é categoricamente negada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_leg_edit';
+
+      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
+        await set(ref(adminCtx.database(), path), {
+          id: 'p_p1415_leg_edit',
+          name: 'Produto Legado Intacto',
+          salePriceCents: 5000
+        });
+      });
+
+      // Tentativa de editar preço ou nome diretamente
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 3000
+      }));
+      await assertFails(update(ref(db, path), {
+        name: 'Nome Alterado Ilegalmente'
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().name).toBe('Produto Legado Intacto');
+      expect(snap.val().salePriceCents).toBe(5000);
+      expect(snap.val().version).toBeUndefined();
+    });
+
+    it('14.15.16: Fixture legada não versionada: bootstrap por cliente comum é negado, preservando registro para migração administrativa', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_leg_boot';
+
+      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
+        await set(ref(adminCtx.database(), path), {
+          id: 'p_p1415_leg_boot',
+          name: 'Produto Legado Seguro',
+          salePriceCents: 8000
+        });
+      });
+
+      // Tentativa de bootstrap via v1 sem baseVersion
+      await assertFails(update(ref(db, path), {
+        version: 1
+      }));
+      // Tentativa de bootstrap via v2 com baseVersion: 1
+      await assertFails(update(ref(db, path), {
+        baseVersion: 1,
+        version: 2
+      }));
+      // Tentativa de bootstrap alterando campos comerciais
+      await assertFails(update(ref(db, path), {
+        salePriceCents: 1000,
+        baseVersion: 1,
+        version: 2
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().version).toBeUndefined();
+      expect(snap.val().salePriceCents).toBe(8000);
+    });
+
+    it('14.15.17: Fixture legada não versionada: é legível por membros autenticados do tenant e não é excluída nem corrompida', async () => {
+      const db = operator1().database();
+      const path = 'tenants/tenantA/products/p_p1415_leg_read';
+
+      await testEnv.withSecurityRulesDisabled(async (adminCtx) => {
+        await set(ref(adminCtx.database(), path), {
+          id: 'p_p1415_leg_read',
+          name: 'Produto Legado Para Leitura',
+          salePriceCents: 4500
+        });
+      });
+
+      // Leitura permitida
+      const snap = await assertSucceeds(get(ref(db, path)));
+      expect(snap.exists()).toBe(true);
+      expect(snap.val().name).toBe('Produto Legado Para Leitura');
+
+      // Tentativa de exclusão física por operador é negada
+      await assertFails(remove(ref(db, path)));
+
+      const snapAfter = await get(ref(db, path));
+      expect(snapAfter.exists()).toBe(true);
+    });
+
+    // -------------------------------------------------------------
+    // GRUPO 4: ESCRITAS DIRETAS, NÓS ANCESTRAIS E ATUALIZAÇÕES MULTIPATH
+    // -------------------------------------------------------------
+    it('14.15.18: Tentativas de escrita direta via set, update e remove em caminhos ancestrais são bloqueadas', async () => {
+      const db = admin1().database();
+
+      // Escrita em /tenants
+      await assertFails(set(ref(db, 'tenants'), { hacked: true }));
+      // Escrita em /tenants/tenantA
+      await assertFails(set(ref(db, 'tenants/tenantA'), { hacked: true }));
+      // Escrita em /tenants/tenantA/products
+      await assertFails(set(ref(db, 'tenants/tenantA/products'), { p_hack: { name: 'Hack' } }));
+      // Multipath update no caminho ancestral
+      await assertFails(update(ref(db, 'tenants/tenantA'), {
+        'products/p_multi/name': 'Multipath'
+      }));
+    });
+
+    it('14.15.19: Atualização multipath em produto tentando omitir version ou baseVersion é rejeitada', async () => {
+      const db = admin1().database();
+      const path = 'tenants/tenantA/products/p_p1415_multipath';
+      await assertSucceeds(set(ref(db, path), {
+        id: 'p_p1415_multipath',
+        name: 'Item Multi',
+        salePriceCents: 1000,
+        version: 1
+      }));
+
+      // Multipath update alterando nome sem fornecer baseVersion ou version válido
+      await assertFails(update(ref(db, path), {
+        name: 'Nome Alterado Sem CAS'
+      }));
+
+      const snap = await get(ref(db, path));
+      expect(snap.val().name).toBe('Item Multi');
+      expect(snap.val().version).toBe(1);
+    });
+
+    it('14.15.20: Exclusão física de produto por operador via remove() ou set(null) é categoricamente rejeitada', async () => {
+      const adminDb = admin1().database();
+      const opDb = operator1().database();
+      const path = 'tenants/tenantA/products/p_p1415_op_phys_del';
+
+      await assertSucceeds(set(ref(adminDb, path), {
+        id: 'p_p1415_op_phys_del',
+        name: 'Produto Anti Operador Delete',
+        salePriceCents: 2000,
+        version: 1
+      }));
+
+      await assertFails(remove(ref(opDb, path)));
+      await assertFails(set(ref(opDb, path), null));
+
+      const snap = await get(ref(adminDb, path));
+      expect(snap.exists()).toBe(true);
+      expect(snap.val().version).toBe(1);
+    });
+
+    it('14.15.21: Exclusão física de produto por admin é aceita, enquanto soft-delete canônico via CAS funciona para operador', async () => {
+      const adminDb = admin1().database();
+      const opDb = operator1().database();
+      const pathAdmin = 'tenants/tenantA/products/p_p1415_adm_del';
+      const pathOp = 'tenants/tenantA/products/p_p1415_op_soft';
+
+      // 1. Admin physical delete
+      await assertSucceeds(set(ref(adminDb, pathAdmin), {
+        id: 'p_p1415_adm_del',
+        name: 'Deletar Fisicamente',
+        salePriceCents: 1000,
+        version: 1
+      }));
+      await assertSucceeds(remove(ref(adminDb, pathAdmin)));
+      const snapAdmin = await get(ref(adminDb, pathAdmin));
+      expect(snapAdmin.exists()).toBe(false);
+
+      // 2. Operador soft-delete com deletedAt e avanço CAS
+      await assertSucceeds(set(ref(adminDb, pathOp), {
+        id: 'p_p1415_op_soft',
+        name: 'Soft Delete Por Operador',
+        salePriceCents: 1000,
+        version: 1
+      }));
+      await assertSucceeds(update(ref(opDb, pathOp), {
+        deletedAt: new Date().toISOString(),
+        baseVersion: 1,
+        version: 2
+      }));
+      const snapOp = await get(ref(adminDb, pathOp));
+      expect(snapOp.exists()).toBe(true);
+      expect(snapOp.val().version).toBe(2);
+      expect(snapOp.val().deletedAt).toBeDefined();
+    });
+
+    it('14.15.22: Disputa concorrente atômica: dois clientes partindo da mesma versão v1: exatamente um avança para v2 e o segundo aborta por conflito', async () => {
+      const db1 = admin1().database();
+      const db2 = admin2().database();
+      const path = 'tenants/tenantA/products/p_p1415_race_atomic';
+
+      await assertSucceeds(set(ref(db1, path), {
+        id: 'p_p1415_race_atomic',
+        name: 'Corrida Atomica',
+        salePriceCents: 1000,
+        version: 1
+      }));
+
+      const runClient = async (db, newPrice) => {
+        let abortReason = null;
+        const txResult = await runTransaction(ref(db, path), (current) => {
+          if (!current) {
+            return {
+              id: 'p_p1415_race_atomic',
+              name: 'Corrida Atomica',
+              salePriceCents: newPrice,
+              baseVersion: 1,
+              version: 2
+            };
+          }
+          if (current.version !== 1) {
+            abortReason = 'VERSION_CONFLICT';
+            return undefined;
+          }
+          return {
+            ...current,
+            salePriceCents: newPrice,
+            baseVersion: 1,
+            version: 2
+          };
+        }, { applyLocally: false });
+        return { txResult, abortReason };
+      };
+
+      const [r1, r2] = await Promise.all([
+        runClient(db1, 1500),
+        runClient(db2, 2500)
+      ]);
+
+      const committed = (r1.txResult.committed ? 1 : 0) + (r2.txResult.committed ? 1 : 0);
+      expect(committed).toBe(1);
+
+      const finalSnap = await get(ref(db1, path));
+      expect(finalSnap.val().version).toBe(2);
+      expect(finalSnap.val().baseVersion).toBe(1);
+
+      // Mutação direta subsequente do perdedor com baseVersion desatualizada é rejeitada
+      await assertFails(update(ref(db2, path), {
+        salePriceCents: 9999,
+        baseVersion: 1,
+        version: 2
+      }));
+    });
+
+    // -------------------------------------------------------------
+    // GRUPO 5: VENDAS, COMPRAS E INVENTORY (IMUTABILIDADE E NÃO-EXCLUSÃO)
+    // -------------------------------------------------------------
+    it('14.15.23: Vendas: imutabilidade de todos os campos comerciais e proibição total de exclusão física para todos os papéis', async () => {
+      const adminDb = admin1().database();
+      const opDb = operator1().database();
+      const path = 'tenants/tenantA/sales/sale_p1415_strict';
+
+      await assertSucceeds(set(ref(adminDb, path), {
+        id: 'sale_p1415_strict',
+        productId: 'prod_1415',
+        quantity: 5,
+        totalSaleCents: 10000,
+        unitSalePriceCents: 2000,
+        unitCostCents: 1000,
+        date: '2026-10-12T10:00:00Z'
+      }));
+
+      // Alteração de cada campo imutável é rejeitada
+      await assertFails(update(ref(adminDb, path), { quantity: 6 }));
+      await assertFails(update(ref(adminDb, path), { productId: 'prod_other' }));
+      await assertFails(update(ref(adminDb, path), { totalSaleCents: 12000 }));
+      await assertFails(update(ref(adminDb, path), { unitSalePriceCents: 2500 }));
+      await assertFails(update(ref(adminDb, path), { unitCostCents: 1200 }));
+      await assertFails(update(ref(adminDb, path), { date: '2026-10-15T00:00:00Z' }));
+
+      // Exclusão física é rejeitada tanto para operador quanto para admin
+      await assertFails(remove(ref(opDb, path)));
+      await assertFails(remove(ref(adminDb, path)));
+      await assertFails(set(ref(adminDb, path), null));
+
+      // Cancelamento permitido preservando dados financeiros
+      await assertSucceeds(update(ref(adminDb, path), {
+        cancelledAt: '2026-10-12T12:00:00Z',
+        cancelReason: 'Cliente solicitou estorno'
+      }));
+
+      const snap = await get(ref(adminDb, path));
+      expect(snap.val().quantity).toBe(5);
+      expect(snap.val().totalSaleCents).toBe(10000);
+      expect(snap.val().unitSalePriceCents).toBe(2000);
+      expect(snap.val().cancelledAt).toBe('2026-10-12T12:00:00Z');
+    });
+
+    it('14.15.24: Compras: imutabilidade de todos os campos comerciais e proibição total de exclusão física', async () => {
+      const adminDb = admin1().database();
+      const path = 'tenants/tenantA/purchases/pur_p1415_strict';
+
+      await assertSucceeds(set(ref(adminDb, path), {
+        id: 'pur_p1415_strict',
+        productId: 'prod_1415',
+        supplierId: 'sup_orig',
+        quantity: 20,
+        totalAmountCents: 20000,
+        date: '2026-10-12T08:00:00Z'
+      }));
+
+      await assertFails(update(ref(adminDb, path), { supplierId: 'sup_hacked' }));
+      await assertFails(update(ref(adminDb, path), { totalAmountCents: 99999 }));
+      await assertFails(update(ref(adminDb, path), { quantity: 50 }));
+      await assertFails(update(ref(adminDb, path), { productId: 'prod_changed' }));
+      await assertFails(update(ref(adminDb, path), { date: '2026-10-20T00:00:00Z' }));
+
+      // Exclusão física rejeitada para admin
+      await assertFails(remove(ref(adminDb, path)));
+      await assertFails(set(ref(adminDb, path), null));
+
+      // Cancelamento permitido
+      await assertSucceeds(update(ref(adminDb, path), {
+        cancelledAt: '2026-10-12T14:00:00Z',
+        cancelReason: 'Pedido cancelado com o fornecedor'
+      }));
+
+      const snap = await get(ref(adminDb, path));
+      expect(snap.val().supplierId).toBe('sup_orig');
+      expect(snap.val().totalAmountCents).toBe(20000);
+      expect(snap.val().quantity).toBe(20);
+      expect(snap.val().cancelledAt).toBe('2026-10-12T14:00:00Z');
+    });
+
+    it('14.15.25: Ledger /inventory: append-only estrito, rejeitando updates parciais, remoções e sobreescritas', async () => {
+      const adminDb = admin1().database();
+      const path = 'tenants/tenantA/inventory/mov_p1415_strict';
+
+      await assertSucceeds(set(ref(adminDb, path), {
+        id: 'mov_p1415_strict',
+        productId: 'prod_1415',
+        quantity: 10,
+        delta: 10,
+        type: 'IN',
+        notes: 'Entrada Inicial Estrita'
+      }));
+
+      await assertFails(update(ref(adminDb, path), { notes: 'Modificacao Proibida' }));
+      await assertFails(update(ref(adminDb, path), { quantity: 20 }));
+      await assertFails(update(ref(adminDb, path), { delta: 20 }));
+      await assertFails(remove(ref(adminDb, path)));
+      await assertFails(set(ref(adminDb, path), null));
+      await assertFails(set(ref(adminDb, path), {
+        id: 'mov_p1415_strict',
+        productId: 'prod_1415',
+        quantity: 99,
+        delta: 99,
+        type: 'IN'
+      }));
+
+      const snap = await get(ref(adminDb, path));
+      expect(snap.val().quantity).toBe(10);
+      expect(snap.val().delta).toBe(10);
+      expect(snap.val().notes).toBe('Entrada Inicial Estrita');
+    });
+
+    // -------------------------------------------------------------
+    // GRUPO 6: PARIDADE E INTEGRAÇÃO DE PROVEDORES
+    // -------------------------------------------------------------
+    it('14.15.26: MockRealtimeProvider: recusa mutação sobre registro não-versionado (unversioned_legacy_conflict)', async () => {
+      const mock = new MockRealtimeProvider();
+      mock.setConnected(true);
+
+      mock._getStore('products').set('prod_mock_unver', {
+        id: 'prod_mock_unver',
+        name: 'Mock Unversioned Item',
+        salePriceCents: 5000
+      });
+
+      let thrownError = null;
+      try {
+        await mock.pushChange({
+          entityType: 'products',
+          entityId: 'prod_mock_unver',
+          action: 'UPDATE',
+          payload: {
+            id: 'prod_mock_unver',
+            salePriceCents: 6000,
+            baseVersion: 1,
+            version: 2
+          }
+        });
+      } catch (err) {
+        thrownError = err;
+      }
+
+      expect(thrownError).toBeDefined();
+      expect(thrownError.code).toBe('concurrency_conflict');
+      expect(thrownError.errorCategory).toBe('unversioned_legacy_conflict');
+
+      const stored = mock._getStore('products').get('prod_mock_unver');
+      expect(stored.version).toBeUndefined();
+      expect(stored.salePriceCents).toBe(5000);
+    });
+
+    it('14.15.27: MockRealtimeProvider: rejeita atualização de produto versionado sem baseVersion (missing_base_version)', async () => {
+      const mock = new MockRealtimeProvider();
+      mock.setConnected(true);
+
+      mock._getStore('products').set('prod_mock_ver', {
+        id: 'prod_mock_ver',
+        name: 'Mock Versioned Item',
+        salePriceCents: 2000,
+        version: 2,
+        baseVersion: 1
+      });
+
+      let thrownError = null;
+      try {
+        await mock.pushChange({
+          entityType: 'products',
+          entityId: 'prod_mock_ver',
+          action: 'UPDATE',
+          payload: {
+            id: 'prod_mock_ver',
+            salePriceCents: 2500,
+            version: 3
+          }
+        });
+      } catch (err) {
+        thrownError = err;
+      }
+
+      expect(thrownError).toBeDefined();
+      expect(thrownError.code).toBe('concurrency_conflict');
+      expect(thrownError.errorCategory).toBe('missing_base_version');
+
+      const stored = mock._getStore('products').get('prod_mock_ver');
+      expect(stored.version).toBe(2);
+      expect(stored.salePriceCents).toBe(2000);
+    });
+  });
 });
-
-

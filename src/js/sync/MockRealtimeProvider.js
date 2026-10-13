@@ -1,4 +1,5 @@
 import { CloudProvider } from './CloudProvider.js';
+import { arePayloadsEquivalent, computeCanonicalPayloadHash } from '../utils/operationIdentity.js';
 
 /**
  * GestãoPro — Provedor Mock do Firebase Realtime Database em Memória (PHASE 03)
@@ -143,28 +144,153 @@ export class MockRealtimeProvider extends CloudProvider {
     if (action === 'DELETE') {
       const existing = store.get(entityId);
       if (existing) {
+        if (existing.deletedAt) {
+          return {
+            success: true,
+            alreadyApplied: true,
+            remoteId: entityId,
+            remoteVersion: existing.updatedAt || timestamp
+          };
+        }
+        const currentVer = existing.version || 1;
         existing.deletedAt = timestamp;
         existing.updatedAt = timestamp;
         existing.lastMutationId = mutationId;
         existing.sourceDeviceId = this.deviceId;
+        existing.baseVersion = currentVer;
+        existing.version = currentVer + 1;
         store.set(entityId, existing);
         this._notifyListeners(entityType, { type: 'deleted', doc: existing, entityId });
       }
-    } else {
-      const existing = store.get(entityId) || {};
-      const newVersion = (existing.version || 0) + 1;
+    } else if (action === 'CREATE') {
+      const existing = store.get(entityId);
+      if (existing) {
+        if (arePayloadsEquivalent(entityType, { ...payload, id: entityId }, existing)) {
+          return {
+            success: true,
+            alreadyApplied: true,
+            remoteId: entityId,
+            remoteVersion: existing.updatedAt || timestamp
+          };
+        } else {
+          const err = new Error(`Conflito de integridade: registro remoto "${entityId}" já existe no destino com dados divergentes.`);
+          err.code = 'concurrency_conflict';
+          err.errorCategory = 'payload_divergence_conflict';
+          err.remoteRecord = existing;
+          throw err;
+        }
+      }
 
-      const updatedDoc = {
-        ...existing,
-        ...payload,
+      const cleanCreatePayload = { ...payload };
+      delete cleanCreatePayload.baseVersion;
+      delete cleanCreatePayload.expectedBaseVersion;
+      delete cleanCreatePayload.basePayloadHash;
+
+      const newDoc = {
+        ...cleanCreatePayload,
         id: entityId,
-        version: payload.version !== undefined ? payload.version : newVersion,
+        version: entityType === 'products' ? 1 : (cleanCreatePayload.version !== undefined ? cleanCreatePayload.version : 1),
         sourceDeviceId: this.deviceId,
         lastMutationId: mutationId,
         updatedAt: payload.updatedAt || timestamp,
         _serverTimestamp: Date.now()
       };
+      store.set(entityId, newDoc);
+      this._notifyListeners(entityType, { type: 'updated', doc: newDoc, entityId });
+    } else if (action === 'UPDATE') {
+      const existing = store.get(entityId);
+      const expectedBase = payload?.baseVersion ?? payload?.expectedBaseVersion;
 
+      if (!existing) {
+        if (expectedBase !== undefined && expectedBase !== null) {
+          const err = new Error(`Conflito de concorrência: registro "${entityId}" esperado na versão v${expectedBase} não existe no servidor.`);
+          err.code = 'concurrency_conflict';
+          err.errorCategory = 'not_found';
+          throw err;
+        }
+
+        // Compatibilidade legada / upsert: quando não há baseVersion esperada, insere com versão inicial
+        const newDoc = {
+          ...payload,
+          id: entityId,
+          version: payload.version !== undefined ? payload.version : 1,
+          sourceDeviceId: this.deviceId,
+          lastMutationId: mutationId,
+          updatedAt: payload.updatedAt || timestamp,
+          _serverTimestamp: Date.now()
+        };
+        delete newDoc.baseVersion;
+        delete newDoc.expectedBaseVersion;
+        delete newDoc.basePayloadHash;
+        store.set(entityId, newDoc);
+        this._notifyListeners(entityType, { type: 'updated', doc: newDoc, entityId });
+        return {
+          success: true,
+          remoteId: entityId,
+          remoteVersion: newDoc.version
+        };
+      }
+
+      if (arePayloadsEquivalent(entityType, { ...payload, id: entityId }, existing)) {
+        return {
+          success: true,
+          alreadyApplied: true,
+          remoteId: entityId,
+          remoteVersion: existing.updatedAt || timestamp
+        };
+      }
+
+      if (existing.version === undefined) {
+        const err = new Error(`Registro legado não versionado "${entityId}" é protegido contra mutações diretas.`);
+        err.code = 'concurrency_conflict';
+        err.errorCategory = 'unversioned_legacy_conflict';
+        err.remoteRecord = existing;
+        throw err;
+      }
+
+      if (expectedBase !== undefined && expectedBase !== null) {
+        const currentVer = existing.version || 1;
+        if (currentVer !== expectedBase) {
+          const err = new Error(`Conflito de concorrência: registro "${entityId}" foi alterado concorrentemente (versão remota v${currentVer} difere da versão esperada).`);
+          err.code = 'concurrency_conflict';
+          err.errorCategory = 'version_conflict';
+          err.remoteRecord = existing;
+          throw err;
+        }
+      } else if (existing.version !== undefined && (payload?.version !== undefined || payload?.baseVersion !== undefined)) {
+        const err = new Error(`Conflito de integridade: atualização do registro versionado "${entityId}" requer baseVersion.`);
+        err.code = 'concurrency_conflict';
+        err.errorCategory = 'missing_base_version';
+        err.remoteRecord = existing;
+        throw err;
+      }
+
+      if (payload?.basePayloadHash) {
+        const currentHash = computeCanonicalPayloadHash(entityType, existing);
+        if (currentHash !== payload.basePayloadHash) {
+          const err = new Error(`Conflito de concorrência: registro "${entityId}" sofreu mutação concorrente por outro dispositivo.`);
+          err.code = 'concurrency_conflict';
+          err.errorCategory = 'payload_divergence_conflict';
+          err.remoteRecord = existing;
+          throw err;
+        }
+      }
+
+      const currentVer = existing.version || 1;
+      const nextVersion = currentVer + 1;
+      const updatedDoc = {
+        ...existing,
+        ...payload,
+        id: entityId,
+        baseVersion: currentVer,
+        version: nextVersion,
+        sourceDeviceId: this.deviceId,
+        lastMutationId: mutationId,
+        updatedAt: payload.updatedAt || timestamp,
+        _serverTimestamp: Date.now()
+      };
+      delete updatedDoc.expectedBaseVersion;
+      delete updatedDoc.basePayloadHash;
       store.set(entityId, updatedDoc);
       this._notifyListeners(entityType, { type: 'updated', doc: updatedDoc, entityId });
     }
@@ -215,6 +341,17 @@ export class MockRealtimeProvider extends CloudProvider {
       list = list.slice(0, options.limit);
     }
     return list;
+  }
+
+  /**
+   * Consulta um registro na store em memória pelo entityType e entityId.
+   * @param {string} entityType
+   * @param {string} entityId
+   * @returns {Promise<Object|null>}
+   */
+  async get(entityType, entityId) {
+    const store = this._getStore(entityType);
+    return store.get(entityId) || null;
   }
 
   async create(entityType, id, data) {

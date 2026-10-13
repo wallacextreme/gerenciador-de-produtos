@@ -84,12 +84,13 @@ Execute o script de provisionamento administrativo localmente com credenciais te
 node scripts/provision-staging.js
 ```
 
-### Usuários Criados no Staging:
-| E-mail | Perfil (`role`) | Tenant ID (`tenantId`) | Escopo de Permissões |
-| :--- | :--- | :--- | :--- |
-| `admin@staging.gestaopro.internal` | `admin` | `tenant-staging` | Acesso total a produtos, estoque, vendas, compras, fornecedores e configurações. |
-| `operador@staging.gestaopro.internal` | `operator` | `tenant-staging` | Acesso operacional (cadastro de produtos, registro de vendas e movimentações de estoque). Bloqueado para alterar configurações. |
-| `auditor@staging.gestaopro.internal` | `viewer` | `tenant-staging` | Apenas leitura de relatórios e catálogo. |
+### Usuários Criados no Staging (Contrato Canônico de Claims):
+| E-mail | Papel Comercial (`appRole`) | Papel Técnico (`role`) | Tenant ID (`tenantId`) | Escopo de Permissões |
+| :--- | :--- | :--- | :--- | :--- |
+| `admin@staging.gestaopro.internal` | `admin` | `authenticated` | `tenant-staging-01` | Acesso total a produtos, estoque, vendas, compras, fornecedores e configurações. |
+| `operador@staging.gestaopro.internal` | `operator` | `authenticated` | `tenant-staging-01` | Acesso operacional (cadastro de produtos, registro de vendas e movimentações de estoque). Bloqueado para alterar configurações. |
+| `auditor@staging.gestaopro.internal` | `viewer` | `authenticated` | `tenant-staging-01` | Auditor de Teste: somente leitura autorizada de relatórios e catálogo. Mutações bloqueadas. |
+| `admin-b@staging.gestaopro.internal` | `admin` | `authenticated` | `tenant-staging-02` | Administrador do Tenant 02: teste de isolamento multi-tenant estrito (bloqueio cruzado). |
 
 ---
 

@@ -43,7 +43,9 @@ export async function getDB() {
 export async function closeDB() {
   if (dbPromise) {
     const db = await dbPromise;
-    db.close();
+    try {
+      db.close();
+    } catch (_) {}
     dbPromise = null;
   }
 }

@@ -50,13 +50,13 @@ describe('PHASE 13.15 — Firebase Storage Emulator & Provider Integration Suite
     }
     testUid = signupData.localId;
 
-    // 2. Configurar custom claims oficiais (tenantId e role)
+    // 2. Configurar custom claims oficiais canônicas (tenantId, role técnico e appRole)
     const updateRes = await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
       body: JSON.stringify({
         localId: testUid,
-        customAttributes: JSON.stringify({ tenantId: testTenant, role: 'operator' })
+        customAttributes: JSON.stringify({ tenantId: testTenant, role: 'authenticated', appRole: 'operator' })
       })
     });
     if (!updateRes.ok) {
@@ -72,14 +72,14 @@ describe('PHASE 13.15 — Firebase Storage Emulator & Provider Integration Suite
     const cred = await signInWithEmailAndPassword(auth, testEmail, testPassword);
     const tokenResult = await cred.user.getIdTokenResult(true);
 
-    if (tokenResult.claims.tenantId !== testTenant || tokenResult.claims.role !== 'operator') {
+    if (tokenResult.claims.tenantId !== testTenant || tokenResult.claims.appRole !== 'operator') {
       throw new Error('Custom claims no ID Token não correspondem ao esperado!');
     }
 
     // 4. Inicializar FirebaseStorageProvider
     const mockAuthService = {
       getTenantId: () => testTenant,
-      getCurrentUser: () => ({ uid: testUid, email: testEmail, role: 'operator' })
+      getCurrentUser: () => ({ uid: testUid, email: testEmail, role: 'operator', appRole: 'operator' })
     };
 
     provider = new FirebaseStorageProvider(config, mockAuthService);
@@ -120,7 +120,8 @@ describe('PHASE 13.15 — Firebase Storage Emulator & Provider Integration Suite
 
     const token = await currentAuthUser.getIdTokenResult();
     expect(token.claims.tenantId).toBe(testTenant);
-    expect(token.claims.role).toBe('operator');
+    expect(token.claims.role).toBe('authenticated');
+    expect(token.claims.appRole).toBe('operator');
     expect(token.claims.aud).toBe(PROJECT_ID);
   });
 
@@ -281,6 +282,361 @@ describe('PHASE 13.15 — Firebase Storage Emulator & Provider Integration Suite
     it('D.6: storage.rules deve rejeitar upload não autenticado após signOut', async () => {
       await signOut(auth);
       const targetRef = ref(storage, `tenants/${testTenant}/products/prod_unauth/photo_unauth.webp`);
+      await expect(
+        uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' })
+      ).rejects.toThrow(/unauthorized/i);
+    });
+
+    it('D.7: storage.rules deve autorizar upload com novo token canônico (role: "authenticated", appRole: "operator")', async () => {
+      const canonicalOpEmail = `canonical_op_${Date.now()}@tenant_staging_01.com`;
+      const signupRes = await fetch(`${AUTH_ADMIN_URL}/accounts:signUp?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: canonicalOpEmail, password: testPassword, returnSecureToken: true })
+      });
+      const canonicalUid = (await signupRes.json()).localId;
+
+      await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+        body: JSON.stringify({
+          localId: canonicalUid,
+          customAttributes: JSON.stringify({ tenantId: testTenant, role: 'authenticated', appRole: 'operator' })
+        })
+      });
+
+      const canonicalApp = initializeApp(config, `canonical-op-app-${Date.now()}`);
+      const canonicalAuth = getAuth(canonicalApp);
+      connectAuthEmulator(canonicalAuth, `http://${AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+      await signInWithEmailAndPassword(canonicalAuth, canonicalOpEmail, testPassword);
+
+      const canonicalStorage = getStorage(canonicalApp, `gs://${config.storageBucket}`);
+      connectStorageEmulator(canonicalStorage, '127.0.0.1', 9199);
+
+      const targetRef = ref(canonicalStorage, `tenants/${testTenant}/products/prod_canonical_op/photo_op.webp`);
+      const uploadRes = await uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' });
+      expect(uploadRes).toBeDefined();
+      expect(uploadRes.metadata.name).toBe('photo_op.webp');
+    });
+
+    it('D.8: storage.rules deve rejeitar upload com novo token (role: "authenticated", appRole: "viewer")', async () => {
+      const canonicalViewerEmail = `canonical_viewer_${Date.now()}@tenant_staging_01.com`;
+      const signupRes = await fetch(`${AUTH_ADMIN_URL}/accounts:signUp?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: canonicalViewerEmail, password: testPassword, returnSecureToken: true })
+      });
+      const canonicalViewerUid = (await signupRes.json()).localId;
+
+      await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+        body: JSON.stringify({
+          localId: canonicalViewerUid,
+          customAttributes: JSON.stringify({ tenantId: testTenant, role: 'authenticated', appRole: 'viewer' })
+        })
+      });
+
+      const canonicalViewerApp = initializeApp(config, `canonical-viewer-app-${Date.now()}`);
+      const canonicalViewerAuth = getAuth(canonicalViewerApp);
+      connectAuthEmulator(canonicalViewerAuth, `http://${AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+      await signInWithEmailAndPassword(canonicalViewerAuth, canonicalViewerEmail, testPassword);
+
+      const canonicalViewerStorage = getStorage(canonicalViewerApp, `gs://${config.storageBucket}`);
+      connectStorageEmulator(canonicalViewerStorage, '127.0.0.1', 9199);
+
+      const targetRef = ref(canonicalViewerStorage, `tenants/${testTenant}/products/prod_canonical_viewer/photo_viewer.webp`);
+      await expect(
+        uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' })
+      ).rejects.toThrow(/unauthorized/i);
+    });
+
+    it('D.9: storage.rules deve rejeitar escrita com token novo incompleto (role: "authenticated" sem appRole)', async () => {
+      const incompleteEmail = `incomplete_${Date.now()}@tenant_staging_01.com`;
+      const signupRes = await fetch(`${AUTH_ADMIN_URL}/accounts:signUp?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: incompleteEmail, password: testPassword, returnSecureToken: true })
+      });
+      const incompleteUid = (await signupRes.json()).localId;
+
+      await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+        body: JSON.stringify({
+          localId: incompleteUid,
+          customAttributes: JSON.stringify({ tenantId: testTenant, role: 'authenticated' })
+        })
+      });
+
+      const incompleteApp = initializeApp(config, `incomplete-app-${Date.now()}`);
+      const incompleteAuth = getAuth(incompleteApp);
+      connectAuthEmulator(incompleteAuth, `http://${AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+      await signInWithEmailAndPassword(incompleteAuth, incompleteEmail, testPassword);
+
+      const incompleteStorage = getStorage(incompleteApp, `gs://${config.storageBucket}`);
+      connectStorageEmulator(incompleteStorage, '127.0.0.1', 9199);
+
+      const targetRef = ref(incompleteStorage, `tenants/${testTenant}/products/prod_incomplete/photo_incomplete.webp`);
+      await expect(
+        uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' })
+      ).rejects.toThrow(/unauthorized/i);
+    });
+
+    it('D.10: storage.rules deve autorizar upload com token canônico admin (role: "authenticated", appRole: "admin")', async () => {
+      const canonicalAdminEmail = `canonical_admin_${Date.now()}@tenant_staging_01.com`;
+      const signupRes = await fetch(`${AUTH_ADMIN_URL}/accounts:signUp?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: canonicalAdminEmail, password: testPassword, returnSecureToken: true })
+      });
+      const canonicalAdminUid = (await signupRes.json()).localId;
+
+      await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+        body: JSON.stringify({
+          localId: canonicalAdminUid,
+          customAttributes: JSON.stringify({ tenantId: testTenant, role: 'authenticated', appRole: 'admin' })
+        })
+      });
+
+      const canonicalAdminApp = initializeApp(config, `canonical-admin-app-${Date.now()}`);
+      const canonicalAdminAuth = getAuth(canonicalAdminApp);
+      connectAuthEmulator(canonicalAdminAuth, `http://${AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+      await signInWithEmailAndPassword(canonicalAdminAuth, canonicalAdminEmail, testPassword);
+
+      const canonicalAdminStorage = getStorage(canonicalAdminApp, `gs://${config.storageBucket}`);
+      connectStorageEmulator(canonicalAdminStorage, '127.0.0.1', 9199);
+
+      const targetRef = ref(canonicalAdminStorage, `tenants/${testTenant}/products/prod_canonical_admin/photo_admin.webp`);
+      const uploadRes = await uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' });
+      expect(uploadRes).toBeDefined();
+      expect(uploadRes.metadata.name).toBe('photo_admin.webp');
+    });
+
+    it('D.11: storage.rules deve rejeitar escrita com token legado admin sem appRole (cutover canônico)', async () => {
+      const legacyAdminEmail = `legacy_admin_${Date.now()}@tenant_staging_01.com`;
+      const signupRes = await fetch(`${AUTH_ADMIN_URL}/accounts:signUp?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: legacyAdminEmail, password: testPassword, returnSecureToken: true })
+      });
+      const legacyAdminUid = (await signupRes.json()).localId;
+
+      await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+        body: JSON.stringify({
+          localId: legacyAdminUid,
+          customAttributes: JSON.stringify({ tenantId: testTenant, role: 'admin' })
+        })
+      });
+
+      const legacyAdminApp = initializeApp(config, `legacy-admin-app-${Date.now()}`);
+      const legacyAdminAuth = getAuth(legacyAdminApp);
+      connectAuthEmulator(legacyAdminAuth, `http://${AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+      await signInWithEmailAndPassword(legacyAdminAuth, legacyAdminEmail, testPassword);
+
+      const legacyAdminStorage = getStorage(legacyAdminApp, `gs://${config.storageBucket}`);
+      connectStorageEmulator(legacyAdminStorage, '127.0.0.1', 9199);
+
+      const targetRef = ref(legacyAdminStorage, `tenants/${testTenant}/products/prod_legacy_admin/photo_leg_adm.webp`);
+      await expect(
+        uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' })
+      ).rejects.toThrow(/unauthorized/i);
+    });
+
+    it('D.11b: storage.rules deve autorizar upload com token canônico (role: "authenticated", appRole: "admin")', async () => {
+      const canonicalAdminEmail = `canonical_admin_${Date.now()}@tenant_staging_01.com`;
+      const signupRes = await fetch(`${AUTH_ADMIN_URL}/accounts:signUp?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: canonicalAdminEmail, password: testPassword, returnSecureToken: true })
+      });
+      const canonicalAdminUid = (await signupRes.json()).localId;
+
+      await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+        body: JSON.stringify({
+          localId: canonicalAdminUid,
+          customAttributes: JSON.stringify({ tenantId: testTenant, role: 'authenticated', appRole: 'admin' })
+        })
+      });
+
+      const canonicalAdminApp = initializeApp(config, `canonical-admin-app-${Date.now()}`);
+      const canonicalAdminAuth = getAuth(canonicalAdminApp);
+      connectAuthEmulator(canonicalAdminAuth, `http://${AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+      await signInWithEmailAndPassword(canonicalAdminAuth, canonicalAdminEmail, testPassword);
+
+      const canonicalAdminStorage = getStorage(canonicalAdminApp, `gs://${config.storageBucket}`);
+      connectStorageEmulator(canonicalAdminStorage, '127.0.0.1', 9199);
+
+      const targetRef = ref(canonicalAdminStorage, `tenants/${testTenant}/products/prod_canonical_admin/photo_can_adm.webp`);
+      const uploadRes = await uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' });
+      expect(uploadRes).toBeDefined();
+      expect(uploadRes.metadata.name).toBe('photo_can_adm.webp');
+    });
+
+    it('D.12: storage.rules deve rejeitar escrita com claims conflitantes/inválidas (role: "admin", appRole: "superadmin")', async () => {
+      const superadminEmail = `superadmin_fail_${Date.now()}@tenant_staging_01.com`;
+      const signupRes = await fetch(`${AUTH_ADMIN_URL}/accounts:signUp?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: superadminEmail, password: testPassword, returnSecureToken: true })
+      });
+      const superadminUid = (await signupRes.json()).localId;
+
+      await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+        body: JSON.stringify({
+          localId: superadminUid,
+          customAttributes: JSON.stringify({ tenantId: testTenant, role: 'admin', appRole: 'superadmin' })
+        })
+      });
+
+      const superadminApp = initializeApp(config, `superadmin-app-${Date.now()}`);
+      const superadminAuth = getAuth(superadminApp);
+      connectAuthEmulator(superadminAuth, `http://${AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+      await signInWithEmailAndPassword(superadminAuth, superadminEmail, testPassword);
+
+      const superadminStorage = getStorage(superadminApp, `gs://${config.storageBucket}`);
+      connectStorageEmulator(superadminStorage, '127.0.0.1', 9199);
+
+      const targetRef = ref(superadminStorage, `tenants/${testTenant}/products/prod_superadmin/photo_superadmin.webp`);
+      await expect(
+        uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' })
+      ).rejects.toThrow(/unauthorized/i);
+    });
+
+    it('D.13: storage.rules deve rejeitar escrita com claims conflitantes (role: "admin", appRole: "viewer")', async () => {
+      const conflictViewerEmail = `conflict_viewer_${Date.now()}@tenant_staging_01.com`;
+      const signupRes = await fetch(`${AUTH_ADMIN_URL}/accounts:signUp?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: conflictViewerEmail, password: testPassword, returnSecureToken: true })
+      });
+      const conflictViewerUid = (await signupRes.json()).localId;
+
+      await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+        body: JSON.stringify({
+          localId: conflictViewerUid,
+          customAttributes: JSON.stringify({ tenantId: testTenant, role: 'admin', appRole: 'viewer' })
+        })
+      });
+
+      const conflictViewerApp = initializeApp(config, `conflict-viewer-app-${Date.now()}`);
+      const conflictViewerAuth = getAuth(conflictViewerApp);
+      connectAuthEmulator(conflictViewerAuth, `http://${AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+      await signInWithEmailAndPassword(conflictViewerAuth, conflictViewerEmail, testPassword);
+
+      const conflictViewerStorage = getStorage(conflictViewerApp, `gs://${config.storageBucket}`);
+      connectStorageEmulator(conflictViewerStorage, '127.0.0.1', 9199);
+
+      const targetRef = ref(conflictViewerStorage, `tenants/${testTenant}/products/prod_conflict_viewer/photo_cv.webp`);
+      await expect(
+        uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' })
+      ).rejects.toThrow(/unauthorized/i);
+    });
+
+    it('D.14: storage.rules deve rejeitar escrita quando appRole estiver presente com valor null (fail-closed)', async () => {
+      const nullAppRoleEmail = `null_approle_${Date.now()}@tenant_staging_01.com`;
+      const signupRes = await fetch(`${AUTH_ADMIN_URL}/accounts:signUp?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: nullAppRoleEmail, password: testPassword, returnSecureToken: true })
+      });
+      const nullAppRoleUid = (await signupRes.json()).localId;
+
+      // Token com 'role': 'admin' mas contendo a chave 'appRole': null
+      await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+        body: JSON.stringify({
+          localId: nullAppRoleUid,
+          customAttributes: JSON.stringify({ tenantId: testTenant, role: 'admin', appRole: null })
+        })
+      });
+
+      const nullAppRoleApp = initializeApp(config, `null-approle-app-${Date.now()}`);
+      const nullAppRoleAuth = getAuth(nullAppRoleApp);
+      connectAuthEmulator(nullAppRoleAuth, `http://${AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+      await signInWithEmailAndPassword(nullAppRoleAuth, nullAppRoleEmail, testPassword);
+
+      const nullAppRoleStorage = getStorage(nullAppRoleApp, `gs://${config.storageBucket}`);
+      connectStorageEmulator(nullAppRoleStorage, '127.0.0.1', 9199);
+
+      // Em storage.rules, 'appRole' in request.auth.token é verdadeiro, desativando o fallback legado
+      const targetRef = ref(nullAppRoleStorage, `tenants/${testTenant}/products/prod_null_approle/photo_null.webp`);
+      await expect(
+        uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' })
+      ).rejects.toThrow(/unauthorized/i);
+    });
+
+    it('D.15: storage.rules deve rejeitar escrita quando appRole estiver presente com string vazia "" (fail-closed)', async () => {
+      const emptyAppRoleEmail = `empty_approle_${Date.now()}@tenant_staging_01.com`;
+      const signupRes = await fetch(`${AUTH_ADMIN_URL}/accounts:signUp?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emptyAppRoleEmail, password: testPassword, returnSecureToken: true })
+      });
+      const emptyAppRoleUid = (await signupRes.json()).localId;
+
+      await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+        body: JSON.stringify({
+          localId: emptyAppRoleUid,
+          customAttributes: JSON.stringify({ tenantId: testTenant, role: 'admin', appRole: '' })
+        })
+      });
+
+      const emptyAppRoleApp = initializeApp(config, `empty-approle-app-${Date.now()}`);
+      const emptyAppRoleAuth = getAuth(emptyAppRoleApp);
+      connectAuthEmulator(emptyAppRoleAuth, `http://${AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+      await signInWithEmailAndPassword(emptyAppRoleAuth, emptyAppRoleEmail, testPassword);
+
+      const emptyAppRoleStorage = getStorage(emptyAppRoleApp, `gs://${config.storageBucket}`);
+      connectStorageEmulator(emptyAppRoleStorage, '127.0.0.1', 9199);
+
+      const targetRef = ref(emptyAppRoleStorage, `tenants/${testTenant}/products/prod_empty_approle/photo_empty.webp`);
+      await expect(
+        uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' })
+      ).rejects.toThrow(/unauthorized/i);
+    });
+
+    it('D.16: storage.rules deve rejeitar escrita quando token não contiver tenantId (mesmo com appRole: "admin")', async () => {
+      const noTenantEmail = `notenant_${Date.now()}@tenant_staging_01.com`;
+      const signupRes = await fetch(`${AUTH_ADMIN_URL}/accounts:signUp?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: noTenantEmail, password: testPassword, returnSecureToken: true })
+      });
+      const noTenantUid = (await signupRes.json()).localId;
+
+      // Token sem tenantId
+      await fetch(`${AUTH_ADMIN_URL}/projects/${PROJECT_ID}/accounts:update?key=fake-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+        body: JSON.stringify({
+          localId: noTenantUid,
+          customAttributes: JSON.stringify({ role: 'authenticated', appRole: 'admin' })
+        })
+      });
+
+      const noTenantApp = initializeApp(config, `notenant-app-${Date.now()}`);
+      const noTenantAuth = getAuth(noTenantApp);
+      connectAuthEmulator(noTenantAuth, `http://${AUTH_EMULATOR_HOST}`, { disableWarnings: true });
+      await signInWithEmailAndPassword(noTenantAuth, noTenantEmail, testPassword);
+
+      const noTenantStorage = getStorage(noTenantApp, `gs://${config.storageBucket}`);
+      connectStorageEmulator(noTenantStorage, '127.0.0.1', 9199);
+
+      const targetRef = ref(noTenantStorage, `tenants/${testTenant}/products/prod_notenant/photo_notenant.webp`);
       await expect(
         uploadBytes(targetRef, syntheticBytes, { contentType: 'image/webp' })
       ).rejects.toThrow(/unauthorized/i);

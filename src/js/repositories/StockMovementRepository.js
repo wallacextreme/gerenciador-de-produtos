@@ -1,4 +1,4 @@
-import { BaseRepository } from './BaseRepository.js';
+import { BaseRepository, getCurrentTenant } from './BaseRepository.js';
 import { getDB } from '../db/connection.js';
 
 export class StockMovementRepository extends BaseRepository {
@@ -13,13 +13,32 @@ export class StockMovementRepository extends BaseRepository {
    */
   async findByProductId(productId, options = {}) {
     const db = await getDB();
-    const movements = await db.getAllFromIndex(this.storeName, 'productId', productId);
-    
+    let movements = await db.getAllFromIndex(this.storeName, 'productId', productId);
+
+    const curTenant = getCurrentTenant();
+    if (curTenant) {
+      movements = movements.filter(m => m.tenantId === curTenant);
+    }
+
     const sortOrder = options.sortOrder || 'desc';
     movements.sort((a, b) => {
       const dateA = new Date(a.date || a.createdAt).getTime();
       const dateB = new Date(b.date || b.createdAt).getTime();
-      return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+      if (dateA !== dateB) {
+        return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+      }
+      const strA = a.createdAt || '';
+      const strB = b.createdAt || '';
+      if (strA !== strB) {
+        return sortOrder === 'desc' ? strB.localeCompare(strA) : strA.localeCompare(strB);
+      }
+      if (typeof a.resultingStock === 'number' && typeof b.previousStock === 'number' && a.resultingStock === b.previousStock) {
+        return sortOrder === 'desc' ? 1 : -1;
+      }
+      if (typeof b.resultingStock === 'number' && typeof a.previousStock === 'number' && b.resultingStock === a.previousStock) {
+        return sortOrder === 'desc' ? -1 : 1;
+      }
+      return 0;
     });
 
     if (options.limit && typeof options.limit === 'number') {

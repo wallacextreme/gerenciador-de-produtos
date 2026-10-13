@@ -1,4 +1,4 @@
-import { BaseRepository } from './BaseRepository.js';
+import { BaseRepository, getCurrentTenant } from './BaseRepository.js';
 import { getDB } from '../db/connection.js';
 
 export class SaleRepository extends BaseRepository {
@@ -13,8 +13,13 @@ export class SaleRepository extends BaseRepository {
    */
   async findByProductId(productId, options = {}) {
     const db = await getDB();
-    const sales = await db.getAllFromIndex(this.storeName, 'productId', productId);
-    
+    let sales = await db.getAllFromIndex(this.storeName, 'productId', productId);
+
+    const curTenant = getCurrentTenant();
+    if (curTenant) {
+      sales = sales.filter(s => s.tenantId === curTenant);
+    }
+
     const sortOrder = options.sortOrder || 'desc';
     sales.sort((a, b) => {
       const dateA = new Date(a.date || a.createdAt).getTime();

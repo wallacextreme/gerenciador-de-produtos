@@ -5,6 +5,8 @@ import { SyncEngine } from '../src/js/services/SyncEngine.js';
 import { CloudProvider, MockCloudProvider, FirebaseProvider } from '../src/js/sync/index.js';
 import { eventBus, EVENTS } from '../src/js/eventBus.js';
 import { getDB } from '../src/js/db/connection.js';
+import { setTenantResolver } from '../src/js/repositories/BaseRepository.js';
+import { authService } from '../src/js/services/AuthService.js';
 
 describe('Firebase & Sync Engine — Sincronização em Nuvem (FASE 13)', () => {
   let syncRepo;
@@ -12,14 +14,18 @@ describe('Firebase & Sync Engine — Sincronização em Nuvem (FASE 13)', () => 
   let syncEngine;
 
   beforeEach(async () => {
+    setTenantResolver(() => 'test_sync_tenant');
     const db = await getDB();
     await db.clear('syncQueue');
     syncRepo = new SyncRepository();
     mockProvider = new MockCloudProvider();
-    syncEngine = new SyncEngine(mockProvider);
+    const session = { authenticated: true, role: 'admin', appRole: 'admin', tenantId: 'test_sync_tenant' };
+    const mockAuth = { getTenantId: () => 'test_sync_tenant', getCurrentSession: () => session, isConfigured: () => true };
+    syncEngine = new SyncEngine(mockProvider, mockAuth);
   });
 
   afterEach(() => {
+    setTenantResolver(() => authService.getTenantId());
     syncEngine.destroy();
   });
 

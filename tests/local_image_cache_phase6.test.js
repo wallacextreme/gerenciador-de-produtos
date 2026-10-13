@@ -8,6 +8,8 @@ import {
 } from '../src/js/services/LocalImageCache.js';
 import { computeImageHash } from '../src/js/services/ImageManifestService.js';
 import { imageManifestRepository } from '../src/js/repositories/ImageManifestRepository.js';
+import { setTenantResolver } from '../src/js/repositories/BaseRepository.js';
+import { authService } from '../src/js/services/AuthService.js';
 
 describe('PHASE 06 — Local Image Cache Suite', () => {
   const TENANT_A = 'tenant_loja_principal';
@@ -19,6 +21,7 @@ describe('PHASE 06 — Local Image Cache Suite', () => {
   };
 
   beforeEach(async () => {
+    setTenantResolver(() => TENANT_A);
     localImageCache.revokeAllUrls();
     localImageCache.setSimulatedQuotaLimit(null);
 
@@ -32,6 +35,7 @@ describe('PHASE 06 — Local Image Cache Suite', () => {
   });
 
   afterEach(() => {
+    setTenantResolver(() => authService.getTenantId());
     localImageCache.revokeAllUrls();
   });
 

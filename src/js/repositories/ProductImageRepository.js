@@ -1,4 +1,4 @@
-import { BaseRepository } from './BaseRepository.js';
+import { BaseRepository, getCurrentTenant } from './BaseRepository.js';
 import { getDB } from '../db/connection.js';
 
 export class ProductImageRepository extends BaseRepository {
@@ -9,6 +9,10 @@ export class ProductImageRepository extends BaseRepository {
   async findByProductId(productId) {
     const db = await getDB();
     const images = await db.getAllFromIndex(this.storeName, 'productId', productId);
+    const curTenant = getCurrentTenant();
+    if (curTenant) {
+      return images.filter(img => !img.deletedAt && img.tenantId === curTenant);
+    }
     return images.filter(img => !img.deletedAt);
   }
 

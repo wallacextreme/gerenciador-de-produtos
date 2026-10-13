@@ -11,6 +11,35 @@ import {
 } from 'firebase/auth';
 import { validateFirebaseConfig } from '../utils/firebaseConfigValidator.js';
 
+export const VALID_BUSINESS_ROLES = Object.freeze(['admin', 'operator', 'viewer']);
+
+/**
+ * Resolve o papel de negócio canônico a partir das claims do token JWT.
+ * Modelo Canônico Estrito (PHASE 14.5 Cutover):
+ * 1. O papel comercial é estritamente concedido por `appRole` quando presente e válido no domínio ('admin', 'operator', 'viewer').
+ * 2. `appRole` ausente, nulo, vazio, com tipo incorreto ou desconhecido NUNCA concede privilégios pelo campo legado `role`.
+ * 3. `role: 'admin'` ou `role: 'operator'` legados sem appRole canônico resultam em 'viewer' (fail-closed, requer migração administrativa).
+ * 4. `role: 'authenticated'` é o papel técnico do Supabase e permanece estritamente sem privilégios comerciais.
+ * 5. Tokens sem claims ou com claims inválidas falham de forma segura para o menor privilégio comercial ('viewer').
+ * @param {Object} [claims={}]
+ * @returns {'admin' | 'operator' | 'viewer'}
+ */
+export function resolveBusinessRole(claims = {}) {
+  if (!claims || typeof claims !== 'object') {
+    return 'viewer';
+  }
+
+  // 1. O papel comercial depende exclusivamente de appRole canônico explícito e válido
+  if (typeof claims.appRole === 'string' && VALID_BUSINESS_ROLES.includes(claims.appRole)) {
+    return claims.appRole;
+  }
+
+  // 2. Qualquer outro caso (appRole ausente, nulo, vazio, tipo incorreto, desconhecido,
+  // ou presença de role: 'admin' / role: 'operator' / role: 'authenticated' sem appRole canônico):
+  // FAIL-CLOSED estrito para o menor privilégio comercial ('viewer').
+  return 'viewer';
+}
+
 /**
  * GestãoPro — Provedor Oficial de Autenticação Firebase Auth (PHASE 02 & PHASE 09)
  * Utiliza o Firebase Modular SDK com persistência local nativa (browserLocalPersistence)
@@ -141,15 +170,26 @@ export class FirebaseAuthProvider extends AuthProvider {
       console.warn('[FirebaseAuthProvider] Não foi possível obter claims do token:', err.message);
     }
 
+    const businessRole = resolveBusinessRole(claims);
+    const tenantId = (typeof claims.tenantId === 'string' && claims.tenantId.trim()) ? claims.tenantId.trim() : null;
+    const isCanonical = typeof claims?.appRole === 'string' && VALID_BUSINESS_ROLES.includes(claims.appRole);
+
+    if (claims && Object.keys(claims).length > 0 && !isCanonical) {
+      console.warn('[FirebaseAuthProvider] Token sem claim canônica "appRole" válida. Sessão resolvida como "viewer" (requer migração administrativa com Firebase Admin SDK).');
+    }
+
     return {
       uid: user.uid,
       email: user.email || '',
       displayName: user.displayName || user.email?.split('@')[0] || 'Operador',
-      tenantId: claims.tenantId || null,
-      role: claims.role || 'operator', // fallback seguro padrão
+      tenantId,
+      role: businessRole,
+      appRole: businessRole,
       claims: { ...claims },
       authenticated: true,
-      lastLoginAt: user.metadata?.lastSignInTime || new Date().toISOString()
+      lastLoginAt: user.metadata?.lastSignInTime || new Date().toISOString(),
+      canonicalClaims: isCanonical,
+      requiresMigration: !isCanonical
     };
   }
 

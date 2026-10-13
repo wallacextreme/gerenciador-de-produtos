@@ -1,8 +1,11 @@
 import { productRepository } from '../repositories/ProductRepository.js';
 import { productImageRepository } from '../repositories/ProductImageRepository.js';
+import { syncRepository } from '../repositories/SyncRepository.js';
 import { executeTransaction } from '../db/transactions.js';
 import { eventBus, EVENTS } from '../eventBus.js';
 import { ProductValidator } from '../validators/ProductValidator.js';
+import { assertPermission } from '../utils/authGuard.js';
+import { authService } from './AuthService.js';
 
 export class ProductService {
   /**
@@ -12,6 +15,9 @@ export class ProductService {
    * @returns {Promise<string>} ID do produto criado
    */
   static async createProduct(productData, imagesData = []) {
+    // 0. Validação de Autorização (Offline-First Guard)
+    assertPermission('create', 'products');
+
     // 1. Validação de Domínio
     ProductValidator.assertValid(productData);
 
@@ -32,6 +38,8 @@ export class ProductService {
     }
 
     const productId = crypto.randomUUID();
+    const currentTenant = productData.tenantId || authService.getTenantId() || null;
+
     const newProduct = {
       name: productData.name.trim(),
       productCode: productData.productCode ? productData.productCode.trim() : '',
@@ -51,14 +59,17 @@ export class ProductService {
       stockQuantity: 0, // Campo de exibição na Fase 3
       isActive: productData.isActive !== false,
       id: productId,
+      tenantId: currentTenant,
+      version: 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
 
-    // Imagens recebem ID do produto e UUID próprio
+    // Imagens recebem ID do produto, tenant e UUID próprio
     const newImages = imagesData.map((img, index) => ({
       id: crypto.randomUUID(),
       productId,
+      tenantId: currentTenant,
       blob: img.blob,
       thumbnailBlob: img.thumbnailBlob,
       width: img.width,
@@ -78,7 +89,7 @@ export class ProductService {
     });
 
     // Dispara Evento via EventBus / BroadcastChannel
-    eventBus.emit(EVENTS.PRODUCT_UPDATED, { id: productId, action: 'create' });
+    eventBus.emit(EVENTS.PRODUCT_UPDATED, { ...newProduct, id: productId, tenantId: currentTenant, action: 'create' });
     return productId;
   }
 
@@ -86,6 +97,9 @@ export class ProductService {
    * Atualiza um produto existente, adiciona novas imagens e remove as excluídas.
    */
   static async updateProduct(id, productData, newImagesData = [], imagesToDeleteIds = []) {
+    // 0. Validação de Autorização (Offline-First Guard)
+    assertPermission('update', 'products');
+
     ProductValidator.assertValid(productData);
 
     const existingProduct = await productRepository.findById(id);
@@ -115,6 +129,19 @@ export class ProductService {
       }
     }
 
+    const expectedBaseVersion = productData.version !== undefined
+      ? productData.version
+      : (productData.baseVersion !== undefined ? productData.baseVersion : (existingProduct.version || 1));
+
+    if (existingProduct.version !== expectedBaseVersion) {
+      throw new Error(`Conflito de concorrência local (CAS): o produto foi alterado por outra aba/operação (versão esperada: ${expectedBaseVersion}, atual: ${existingProduct.version}).`);
+    }
+
+    const currentTenant = existingProduct.tenantId || productData.tenantId || authService.getTenantId() || null;
+
+    const currentVersion = expectedBaseVersion;
+    const nextVersion = currentVersion + 1;
+
     const updatedProduct = {
       ...existingProduct,
       name: productData.name.trim(),
@@ -134,6 +161,9 @@ export class ProductService {
       notes: productData.notes !== undefined ? productData.notes.trim() : existingProduct.notes,
       isActive: productData.isActive !== undefined ? productData.isActive : existingProduct.isActive,
       id, // Imutabilidade do ID
+      tenantId: currentTenant,
+      baseVersion: currentVersion,
+      version: nextVersion,
       updatedAt: new Date().toISOString()
     };
 
@@ -144,6 +174,7 @@ export class ProductService {
     const newImages = newImagesData.map((img, index) => ({
       id: crypto.randomUUID(),
       productId: id,
+      tenantId: currentTenant,
       blob: img.blob,
       thumbnailBlob: img.thumbnailBlob,
       width: img.width,
@@ -155,6 +186,14 @@ export class ProductService {
     }));
 
     await executeTransaction(['products', 'productImages'], 'readwrite', async (stores) => {
+      const liveProduct = await stores.products.get(id);
+      if (!liveProduct || liveProduct.deletedAt) {
+        throw new Error('Produto não encontrado ou inativo.');
+      }
+      if (liveProduct.version !== currentVersion) {
+        throw new Error(`Conflito de concorrência local (CAS): o produto foi alterado por outra aba/operação (versão esperada: ${currentVersion}, atual: ${liveProduct.version}).`);
+      }
+
       await stores.products.put(updatedProduct);
 
       // Deletar imagens marcadas
@@ -175,7 +214,7 @@ export class ProductService {
       }
     });
 
-    eventBus.emit(EVENTS.PRODUCT_UPDATED, { id, action: 'update' });
+    eventBus.emit(EVENTS.PRODUCT_UPDATED, { ...updatedProduct, id, tenantId: currentTenant, action: 'update', baseVersion: currentVersion, version: nextVersion });
     return id;
   }
 
@@ -183,12 +222,19 @@ export class ProductService {
    * Realiza Soft Delete no produto.
    */
   static async deleteProduct(id) {
+    // 0. Validação de Autorização (Offline-First Guard)
+    assertPermission('delete', 'products');
+
+    const product = await productRepository.findById(id);
+    const tenantId = product?.tenantId || authService.getTenantId() || null;
+
     const success = await productRepository.softDelete(id);
     if (success) {
-      eventBus.emit(EVENTS.PRODUCT_DELETED, { id });
+      eventBus.emit(EVENTS.PRODUCT_DELETED, { id, tenantId });
     }
     return success;
   }
+
 
   /**
    * Obtém produto e suas imagens associadas.

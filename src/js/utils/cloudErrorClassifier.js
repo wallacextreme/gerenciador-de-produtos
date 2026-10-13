@@ -90,7 +90,10 @@ export function classifyCloudError(error) {
     lowerMsg.includes('etimedout') ||
     lowerMsg.includes('offline') ||
     lowerMsg.includes('rate limit') ||
-    lowerMsg.includes('too many requests')
+    lowerMsg.includes('too many requests') ||
+    lowerMsg.includes('conexão') ||
+    lowerMsg.includes('conexao') ||
+    lowerMsg.includes('connection')
   ) {
     return {
       category: ERROR_CATEGORY.TEMPORARY,

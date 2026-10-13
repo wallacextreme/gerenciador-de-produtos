@@ -1,6 +1,11 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    function isAuthorizedEditor() {
+      return 'appRole' in request.auth.token &&
+             (request.auth.token.appRole == 'admin' || request.auth.token.appRole == 'operator');
+    }
+
     // Isolamento estrito por tenant em /tenants/{tenantId}/products/{productId}/{photoId}
     match /tenants/{tenantId}/products/{productId}/{photoId} {
       // Leitura permitida exclusivamente para membros autenticados do mesmo tenant
@@ -9,7 +14,7 @@ service firebase.storage {
       // Criação e atualização de imagens: apenas imagens válidas abaixo de 10MB nos formatos permitidos (jpeg, png, webp)
       allow write: if request.auth != null &&
         request.auth.token.tenantId == tenantId &&
-        (request.auth.token.role == 'admin' || request.auth.token.role == 'operator') &&
+        isAuthorizedEditor() &&
         request.resource.size < 10 * 1024 * 1024 &&
         request.resource.contentType.matches('image/.*') &&
         (request.resource.contentType == 'image/jpeg' || request.resource.contentType == 'image/png' || request.resource.contentType == 'image/webp');
@@ -17,7 +22,7 @@ service firebase.storage {
       // Exclusão permitida aos operadores e administradores do mesmo tenant
       allow delete: if request.auth != null &&
         request.auth.token.tenantId == tenantId &&
-        (request.auth.token.role == 'admin' || request.auth.token.role == 'operator');
+        isAuthorizedEditor();
     }
   }
 }

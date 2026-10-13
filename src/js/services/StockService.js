@@ -4,6 +4,8 @@ import { settingsRepository } from '../repositories/SettingsRepository.js';
 import { executeTransaction } from '../db/transactions.js';
 import { eventBus, EVENTS } from '../eventBus.js';
 import { StockValidator, MOVEMENT_TYPES } from '../validators/StockValidator.js';
+import { assertPermission } from '../utils/authGuard.js';
+import { authService } from './AuthService.js';
 
 export const STOCK_STATUS = {
   NORMAL: 'NORMAL',
@@ -20,6 +22,9 @@ export class StockService {
    * @returns {Promise<Object>} Resultado com ID do movimento e novos saldos
    */
   static async recordMovement(movementData) {
+    // 0. Validação de Autorização (Offline-First Guard)
+    assertPermission('create', 'stockMovements');
+
     // 1. Validação de Domínio
     StockValidator.assertValid(movementData);
 
@@ -29,6 +34,7 @@ export class StockService {
     }
 
     const movementId = crypto.randomUUID();
+    const currentTenant = movementData.tenantId || product.tenantId || authService.getTenantId() || null;
     const quantity = movementData.quantity;
     const type = movementData.type;
 
@@ -68,6 +74,7 @@ export class StockService {
       const movementRecord = {
         id: movementId,
         productId: movementData.productId,
+        tenantId: currentTenant,
         type,
         quantity: type === 'ADJUSTMENT' ? Math.abs(quantity) : quantity,
         delta,
@@ -95,18 +102,29 @@ export class StockService {
 
     // Disparar eventos
     eventBus.emit(EVENTS.STOCK_CHANGED, {
-      productId: movementData.productId,
+      id: movementId,
       movementId,
+      productId: movementData.productId,
+      tenantId: currentTenant,
       type,
       delta,
+      quantity: movementData.quantity,
+      unitCostCents: movementData.unitCostCents || 0,
+      reason: movementData.reason || '',
+      notes: movementData.notes || '',
+      referenceId: movementData.referenceId || '',
+      referenceType: movementData.referenceType || '',
       previousStock,
-      newStock
+      newStock,
+      date: movementData.date || new Date().toISOString()
     });
 
     eventBus.emit(EVENTS.PRODUCT_UPDATED, {
       id: movementData.productId,
+      tenantId: currentTenant,
       action: 'stock_change'
     });
+
 
     return {
       movementId,

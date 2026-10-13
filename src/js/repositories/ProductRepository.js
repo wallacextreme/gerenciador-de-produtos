@@ -1,4 +1,4 @@
-import { BaseRepository } from './BaseRepository.js';
+import { BaseRepository, getCurrentTenant } from './BaseRepository.js';
 import { getDB } from '../db/connection.js';
 
 export class ProductRepository extends BaseRepository {
@@ -9,19 +9,31 @@ export class ProductRepository extends BaseRepository {
   async findByProductCode(code) {
     if (!code) return null;
     const db = await getDB();
-    return await db.getFromIndex(this.storeName, 'productCode', code);
+    const item = await db.getFromIndex(this.storeName, 'productCode', code);
+    if (!item) return null;
+    const curTenant = getCurrentTenant();
+    if (curTenant && item.tenantId !== curTenant) return null;
+    return item;
   }
 
   async findByInternalCode(code) {
     if (!code) return null;
     const db = await getDB();
-    return await db.getFromIndex(this.storeName, 'internalCode', code);
+    const item = await db.getFromIndex(this.storeName, 'internalCode', code);
+    if (!item) return null;
+    const curTenant = getCurrentTenant();
+    if (curTenant && item.tenantId !== curTenant) return null;
+    return item;
   }
 
   async findByBarcode(barcode) {
     if (!barcode) return null;
     const db = await getDB();
-    return await db.getFromIndex(this.storeName, 'barcode', barcode);
+    const item = await db.getFromIndex(this.storeName, 'barcode', barcode);
+    if (!item) return null;
+    const curTenant = getCurrentTenant();
+    if (curTenant && item.tenantId !== curTenant) return null;
+    return item;
   }
 
   /**

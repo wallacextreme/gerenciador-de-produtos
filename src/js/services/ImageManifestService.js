@@ -50,6 +50,8 @@ export function normalizeImageMetadata(raw = {}) {
     isPrimary: !!raw.isPrimary,
     url: raw.url ? String(raw.url) : '',
     thumbnailUrl: raw.thumbnailUrl ? String(raw.thumbnailUrl) : (raw.url ? String(raw.url) : ''),
+    storageProvider: raw.storageProvider ? String(raw.storageProvider) : undefined,
+    remotePath: raw.remotePath ? String(raw.remotePath) : (raw.url ? String(raw.url) : ''),
     version,
     hash: raw.hash ? String(raw.hash) : '',
     sizeBytes: typeof raw.sizeBytes === 'number' ? Math.max(0, raw.sizeBytes) : 0,

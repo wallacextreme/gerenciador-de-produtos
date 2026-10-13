@@ -430,7 +430,8 @@ describe('Firebase Auth — Autenticação e Gestão de Sessão (FASE 02)', () =
         getIdTokenResult: async () => ({
           claims: {
             tenantId: 'tenant_filial_2',
-            role: 'admin'
+            role: 'authenticated',
+            appRole: 'admin'
           }
         })
       };

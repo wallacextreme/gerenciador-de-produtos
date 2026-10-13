@@ -2,6 +2,8 @@ import { supplierRepository } from '../repositories/SupplierRepository.js';
 import { purchaseRepository } from '../repositories/PurchaseRepository.js';
 import { SupplierValidator } from '../validators/SupplierValidator.js';
 import { eventBus, EVENTS } from '../eventBus.js';
+import { assertPermission } from '../utils/authGuard.js';
+import { authService } from './AuthService.js';
 
 export class SupplierService {
   /**
@@ -10,6 +12,9 @@ export class SupplierService {
    * @returns {Promise<string>} ID do fornecedor criado
    */
   static async createSupplier(supplierData) {
+    // 0. Validação de Autorização (Offline-First Guard - Exclusivo para admin)
+    assertPermission('create', 'suppliers');
+
     SupplierValidator.assertValid(supplierData);
 
     // Verificar se já existe fornecedor ativo com o mesmo documento
@@ -21,10 +26,12 @@ export class SupplierService {
     }
 
     const supplierId = crypto.randomUUID();
+    const currentTenant = supplierData.tenantId || authService.getTenantId() || null;
     const nowIso = new Date().toISOString();
 
     const record = {
       id: supplierId,
+      tenantId: currentTenant,
       name: supplierData.name.trim(),
       document: supplierData.document ? supplierData.document.trim() : '',
       email: supplierData.email ? supplierData.email.trim() : '',
@@ -40,7 +47,7 @@ export class SupplierService {
 
     await supplierRepository.create(record);
 
-    eventBus.emit('SUPPLIER_CREATED', { id: supplierId, name: record.name });
+    eventBus.emit('SUPPLIER_CREATED', { ...record, id: supplierId, name: record.name, tenantId: currentTenant });
     return supplierId;
   }
 
@@ -50,6 +57,9 @@ export class SupplierService {
    * @param {Object} supplierData 
    */
   static async updateSupplier(id, supplierData) {
+    // 0. Validação de Autorização (Offline-First Guard - Exclusivo para admin)
+    assertPermission('update', 'suppliers');
+
     const existing = await supplierRepository.findById(id);
     if (!existing || existing.deletedAt) {
       throw new Error('Fornecedor não encontrado.');
@@ -65,10 +75,12 @@ export class SupplierService {
       }
     }
 
+    const currentTenant = existing.tenantId || supplierData.tenantId || authService.getTenantId() || null;
     const nowIso = new Date().toISOString();
     const updated = {
       ...existing,
       name: supplierData.name.trim(),
+      tenantId: currentTenant,
       document: supplierData.document !== undefined ? supplierData.document.trim() : existing.document,
       email: supplierData.email !== undefined ? supplierData.email.trim() : existing.email,
       phone: supplierData.phone !== undefined ? supplierData.phone.trim() : existing.phone,
@@ -81,7 +93,7 @@ export class SupplierService {
 
     await supplierRepository.update(updated);
 
-    eventBus.emit('SUPPLIER_UPDATED', { id, name: updated.name });
+    eventBus.emit('SUPPLIER_UPDATED', { ...updated, id, name: updated.name, tenantId: currentTenant });
     return updated;
   }
 
@@ -90,6 +102,9 @@ export class SupplierService {
    * @param {string} id 
    */
   static async deleteSupplier(id) {
+    // 0. Validação de Autorização (Offline-First Guard - Exclusivo para admin)
+    assertPermission('delete', 'suppliers');
+
     const existing = await supplierRepository.findById(id);
     if (!existing || existing.deletedAt) {
       throw new Error('Fornecedor não encontrado.');
@@ -98,8 +113,9 @@ export class SupplierService {
     existing.deletedAt = new Date().toISOString();
     await supplierRepository.update(existing);
 
-    eventBus.emit('SUPPLIER_DELETED', { id, name: existing.name });
+    eventBus.emit('SUPPLIER_DELETED', { id, name: existing.name, tenantId: existing.tenantId });
   }
+
 
   /**
    * Obtém detalhes de um fornecedor com histórico de compras.

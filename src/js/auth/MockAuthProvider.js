@@ -20,14 +20,15 @@ export class MockAuthProvider extends AuthProvider {
     this.currentSession = null;
     this._listeners = new Set();
 
-    // Registra usuário padrão de testes
+    // Registra usuário padrão de testes com formato canônico
     this.addUser({
       uid: 'user_admin_001',
       email: 'admin@gestaopro.com',
       password: 'password123',
       displayName: 'Administrador Matriz',
       tenantId: 'tenant_loja_01',
-      role: 'admin'
+      role: 'admin',
+      appRole: 'admin'
     });
 
     this.addUser({
@@ -36,7 +37,8 @@ export class MockAuthProvider extends AuthProvider {
       password: 'password123',
       displayName: 'Operador Caixa 1',
       tenantId: 'tenant_loja_01',
-      role: 'operator'
+      role: 'operator',
+      appRole: 'operator'
     });
   }
 
@@ -62,17 +64,20 @@ export class MockAuthProvider extends AuthProvider {
     this.isOffline = !!val;
   }
 
-  addUser({ uid, email, password, displayName, tenantId, role = 'operator', customClaims = {} }) {
+  addUser({ uid, email, password, displayName, tenantId, role = 'operator', appRole = null, customClaims = {} }) {
+    const resolvedAppRole = appRole || (['admin', 'operator', 'viewer'].includes(role) ? role : 'operator');
     this.registeredUsers.set(email.toLowerCase().trim(), {
       uid: uid || `mock_uid_${crypto.randomUUID().slice(0, 8)}`,
       email: email.toLowerCase().trim(),
       password,
       displayName: displayName || email.split('@')[0],
       tenantId: tenantId || null,
-      role,
+      role: resolvedAppRole,
+      appRole: resolvedAppRole,
       claims: {
         tenantId: tenantId || null,
-        role,
+        role: customClaims.role || role,
+        appRole: resolvedAppRole,
         ...customClaims
       }
     });
@@ -115,15 +120,20 @@ export class MockAuthProvider extends AuthProvider {
       getIdTokenResult: async () => ({ claims: { ...userRecord.claims } })
     };
 
+    const isCanonical = typeof userRecord.claims?.appRole === 'string' && ['admin', 'operator', 'viewer'].includes(userRecord.claims.appRole);
+
     this.currentSession = {
       uid: userRecord.uid,
       email: userRecord.email,
       displayName: userRecord.displayName,
       tenantId: userRecord.tenantId,
-      role: userRecord.role,
+      role: userRecord.appRole || userRecord.role,
+      appRole: userRecord.appRole || userRecord.role,
       claims: { ...userRecord.claims },
       authenticated: true,
-      lastLoginAt: new Date().toISOString()
+      lastLoginAt: new Date().toISOString(),
+      canonicalClaims: isCanonical,
+      requiresMigration: !isCanonical
     };
 
     this._notifyListeners();

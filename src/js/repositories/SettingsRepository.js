@@ -1,4 +1,5 @@
 import { BaseRepository } from './BaseRepository.js';
+import { assertPermission } from '../utils/authGuard.js';
 
 export class SettingsRepository extends BaseRepository {
   constructor() {
@@ -12,6 +13,9 @@ export class SettingsRepository extends BaseRepository {
   }
 
   async setSetting(key, value) {
+    if (key !== 'firebaseConfig' && key !== 'lastSyncTimestamp' && key !== 'autoSyncEnabled' && !String(key).startsWith('manifest_sync_')) {
+      assertPermission('update', 'settings');
+    }
     const setting = await this.findById(key);
     if (setting) {
       setting.value = value;

@@ -3,6 +3,7 @@ import { executeTransaction } from '../db/transactions.js';
 import { computeImageHash, normalizeImageMetadata } from './ImageManifestService.js';
 import { productImageRepository } from '../repositories/ProductImageRepository.js';
 import { imageManifestRepository } from '../repositories/ImageManifestRepository.js';
+import { getCurrentTenant } from '../repositories/BaseRepository.js';
 
 /**
  * Categorias de Retenção de Cache Local (PHASE 06).
@@ -74,7 +75,7 @@ export class LocalImageCache {
 
     const photoId = String(params.photoId || params.id || '');
     const productId = String(params.productId || '');
-    const tenantId = String(params.tenantId || 'default_tenant');
+    const tenantId = String(params.tenantId || getCurrentTenant() || 'default_tenant');
 
     if (!photoId) throw new Error('[LocalImageCache] photoId é obrigatório.');
     if (!productId) throw new Error('[LocalImageCache] productId é obrigatório.');
@@ -174,6 +175,22 @@ export class LocalImageCache {
     });
 
     await executeTransaction(['productImages', 'imageManifest'], 'readwrite', async (stores) => {
+      const rawImg = await stores.productImages.get(photoId);
+      const rawManifest = await stores.imageManifest.get(photoId);
+
+      if (rawImg && rawImg.tenantId && rawImg.tenantId !== tenantId) {
+        throw new Error(`[LocalImageCache] Violação de isolamento multi-tenant: photoId "${photoId}" pertence ao tenant "${rawImg.tenantId}".`);
+      }
+      if (rawManifest && rawManifest.tenantId && rawManifest.tenantId !== tenantId) {
+        throw new Error(`[LocalImageCache] Violação de isolamento multi-tenant: photoId "${photoId}" pertence ao tenant "${rawManifest.tenantId}".`);
+      }
+      if (rawImg && rawImg.productId && rawImg.productId !== productId) {
+        throw new Error(`[LocalImageCache] Conflito de integridade: photoId "${photoId}" já está associado ao produto "${rawImg.productId}".`);
+      }
+      if (rawManifest && rawManifest.productId && rawManifest.productId !== productId) {
+        throw new Error(`[LocalImageCache] Conflito de integridade: photoId "${photoId}" já está associado ao produto "${rawManifest.productId}".`);
+      }
+
       await stores.productImages.put(productImgRecord);
       await stores.imageManifest.put(manifestRecord);
     });
@@ -224,7 +241,8 @@ export class LocalImageCache {
     if (!record || record.deletedAt) return null;
 
     // Isolamento multi-tenant estrito
-    if (tenantId && record.tenantId && record.tenantId !== tenantId) {
+    const curTenant = tenantId || getCurrentTenant();
+    if (curTenant && record.tenantId !== curTenant) {
       return null;
     }
 
@@ -349,7 +367,7 @@ export class LocalImageCache {
     this.revokeAllUrls();
 
     for (const item of all) {
-      if (tenantId && item.tenantId && item.tenantId !== tenantId) {
+      if (tenantId && item.tenantId !== tenantId) {
         continue;
       }
       await this.remove(item.photoId || item.id, { tenantId, hard });
@@ -370,10 +388,11 @@ export class LocalImageCache {
     const { tenantId = null } = options;
 
     // Consulta primeiro o manifesto local (mais leve, sem Blobs)
-    const manifest = await imageManifestRepository.findByPhotoId(photoId);
+    const manifest = await imageManifestRepository.findByPhotoId(photoId, { tenantId });
     if (!manifest || manifest.deletedAt) return null;
 
-    if (tenantId && manifest.tenantId && manifest.tenantId !== tenantId) {
+    const curTenant = tenantId || getCurrentTenant();
+    if (curTenant && manifest.tenantId !== curTenant) {
       return null;
     }
 
@@ -531,7 +550,7 @@ export class LocalImageCache {
     const candidates = [];
     for (const item of all) {
       if (item.deletedAt) continue;
-      if (tenantId && item.tenantId && item.tenantId !== tenantId) continue;
+      if (tenantId && item.tenantId !== tenantId) continue;
 
       const category = LocalImageCache.getRetentionCategory(item, now);
 
@@ -581,7 +600,7 @@ export class LocalImageCache {
 
     for (const item of all) {
       if (item.deletedAt) continue;
-      if (tenantId && item.tenantId && item.tenantId !== tenantId) continue;
+      if (tenantId && item.tenantId !== tenantId) continue;
 
       photosCount++;
       const fBytes = item.blob ? item.blob.size : (item.sizeBytes || 0);

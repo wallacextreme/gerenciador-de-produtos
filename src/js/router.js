@@ -9,7 +9,9 @@ export class Router {
     this.redirectAfterLogin = null;
     
     // Listen for hash changes
-    window.addEventListener('hashchange', () => this.handleRoute());
+    if (typeof window !== 'undefined') {
+      window.addEventListener('hashchange', () => this.handleRoute());
+    }
   }
 
   init(element) {

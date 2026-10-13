@@ -4,11 +4,12 @@ export { MockCloudProvider } from './MockCloudProvider.js';
 export { FirebaseRealtimeProvider } from './FirebaseRealtimeProvider.js';
 export { MockRealtimeProvider } from './MockRealtimeProvider.js';
 
-// Image Storage Providers (PHASE 04)
+// Image Storage Providers (PHASE 04 & PHASE 14.1)
 export { ImageStorageProvider } from './ImageStorageProvider.js';
 export { MockImageStorageProvider } from './MockImageStorageProvider.js';
 export { FirebaseStorageProvider } from './FirebaseStorageProvider.js';
 export { CloudinaryImageProvider } from './CloudinaryImageProvider.js';
+export { SupabaseStorageProvider } from './SupabaseStorageProvider.js';
 
 // Image Manifest (PHASE 05)
 export { ImageManifestRepository, imageManifestRepository } from '../repositories/ImageManifestRepository.js';

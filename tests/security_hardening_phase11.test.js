@@ -133,9 +133,9 @@ describe('PHASE 11 — SECURITY HARDENING SUITE', () => {
       const rules = JSON.parse(readFileSync(join(process.cwd(), 'database.rules.json'), 'utf-8'));
       const tenant = rules.rules.tenants.$tenantId;
 
-      expect(tenant.settings.$settingKey['.write']).toContain("role === 'admin'");
-      expect(tenant.purchases.$purchaseId['.write']).toContain("role === 'admin'");
-      expect(tenant.suppliers.$supplierId['.write']).toContain("role === 'admin'");
+      expect(tenant.settings.$settingKey['.write']).toContain("appRole === 'admin'");
+      expect(tenant.purchases.$purchaseId['.write']).toContain("appRole === 'admin'");
+      expect(tenant.suppliers.$supplierId['.write']).toContain("appRole === 'admin'");
     });
   });
 
@@ -159,10 +159,10 @@ describe('PHASE 11 — SECURITY HARDENING SUITE', () => {
       const rules = JSON.parse(readFileSync(join(process.cwd(), 'database.rules.json'), 'utf-8'));
       const productWriteRule = rules.rules.tenants.$tenantId.products.$productId['.write'];
 
-      expect(productWriteRule).toContain("role === 'admin'");
-      expect(productWriteRule).toContain("role === 'operator'");
-      expect(productWriteRule).not.toContain("role === 'superadmin'");
-      expect(productWriteRule).not.toContain("role === 'root'");
+      expect(productWriteRule).toContain("appRole === 'admin'");
+      expect(productWriteRule).toContain("appRole === 'operator'");
+      expect(productWriteRule).not.toContain("appRole === 'superadmin'");
+      expect(productWriteRule).not.toContain("appRole === 'root'");
     });
   });
 
@@ -175,7 +175,7 @@ describe('PHASE 11 — SECURITY HARDENING SUITE', () => {
       const userWriteRule = rules.rules.users.$uid['.write'];
 
       // Regra exige que apenas admin altere role ou que o próprio usuário não injete role
-      expect(userWriteRule).toContain("auth.token.role === 'admin'");
+      expect(userWriteRule).toContain("auth.token.appRole === 'admin'");
       expect(userWriteRule).toContain("!newData.hasChild('role')");
     });
   });

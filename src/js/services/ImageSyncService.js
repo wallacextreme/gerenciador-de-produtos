@@ -69,6 +69,15 @@ export const IMAGE_SYNC_EVENTS = Object.freeze({
 export class ImageSyncService {
   constructor(options = {}) {
     this.storageProvider = options.storageProvider || null;
+    this._providers = new Map();
+    if (options.providers && typeof options.providers === 'object') {
+      for (const [pName, pInst] of Object.entries(options.providers)) {
+        this._providers.set(pName.toLowerCase(), pInst);
+      }
+    }
+    if (this.storageProvider) {
+      this.setStorageProvider(this.storageProvider);
+    }
     this.imageCache = options.imageCache || localImageCache;
     this.manifestService = options.manifestService || imageManifestService;
     this.manifestRepository = options.manifestRepository || imageManifestRepository;
@@ -112,9 +121,49 @@ export class ImageSyncService {
   /**
    * Configura o provedor de armazenamento remoto de fotos.
    * @param {ImageStorageProvider} provider 
+   * @param {string} [name]
    */
-  setStorageProvider(provider) {
+  setStorageProvider(provider, name = null) {
     this.storageProvider = provider;
+    if (!this._providers) this._providers = new Map();
+    this._providers.set('default', provider);
+    if (name) {
+      this._providers.set(String(name).toLowerCase(), provider);
+    } else if (provider && typeof provider.getProviderName === 'function') {
+      const pName = provider.getProviderName().toLowerCase();
+      if (pName.includes('supabase')) this._providers.set('supabase', provider);
+      if (pName.includes('firebase')) this._providers.set('firebase', provider);
+      if (pName.includes('cloudinary')) this._providers.set('cloudinary', provider);
+      if (pName.includes('mock')) this._providers.set('mock', provider);
+    }
+  }
+
+  /**
+   * Registra um provedor adicional pelo identificador.
+   * @param {string} name
+   * @param {ImageStorageProvider} provider
+   */
+  registerProvider(name, provider) {
+    if (!this._providers) this._providers = new Map();
+    if (name && provider) {
+      this._providers.set(String(name).toLowerCase(), provider);
+    }
+  }
+
+  /**
+   * Resolve o provedor de storage adequado para o item com base no manifesto ou padrão.
+   * @private
+   * @param {Object} item
+   * @returns {ImageStorageProvider|null}
+   */
+  _resolveProvider(item) {
+    if (item && item.storageProvider && this._providers) {
+      const key = String(item.storageProvider).toLowerCase();
+      if (this._providers.has(key)) {
+        return this._providers.get(key);
+      }
+    }
+    return this.storageProvider;
   }
 
   /**
@@ -335,6 +384,7 @@ export class ImageSyncService {
       url: itemParams.url || null,
       thumbnailUrl: itemParams.thumbnailUrl || null,
       remotePath: itemParams.remotePath || null,
+      storageProvider: itemParams.storageProvider || null,
       state: QUEUE_STATE.QUEUED,
       attempts: 0,
       lastError: null,
@@ -467,6 +517,8 @@ export class ImageSyncService {
         expectedHash: photo.hash,
         url: photo.url,
         thumbnailUrl: photo.thumbnailUrl,
+        remotePath: photo.remotePath,
+        storageProvider: photo.storageProvider,
         reason: 'on_demand_product'
       });
       queuedCount++;
@@ -653,17 +705,19 @@ export class ImageSyncService {
    * @param {AbortController|null} abortController 
    */
   async _executeDownload(item, abortController) {
-    if (!this.storageProvider) {
+    const provider = this._resolveProvider(item);
+    if (!provider) {
       throw new Error('[ImageSyncService] Provedor de armazenamento (storageProvider) não configurado.');
     }
 
     // 1. Download do Blob através do ImageStorageProvider
     let blob = null;
-    if (typeof this.storageProvider.download === 'function') {
-      blob = await this.storageProvider.download(item.photoId, item.url || item.remotePath);
+    const targetRef = item.remotePath || item.url;
+    if (typeof provider.download === 'function') {
+      blob = await provider.download(item.photoId, targetRef);
     } else {
       // Fallback via getUrl() + fetch
-      const url = await this.storageProvider.getUrl(item.photoId, item.url || item.remotePath);
+      const url = await provider.getUrl(item.photoId, targetRef);
       if (!url) throw new Error(`URL remota da foto ${item.photoId} indisponível.`);
       const response = await fetch(url, { signal: abortController ? abortController.signal : undefined });
       if (!response.ok) throw new Error(`HTTP ${response.status} ao obter foto.`);

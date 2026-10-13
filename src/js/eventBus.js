@@ -71,6 +71,19 @@ export class EventBus {
       }
     }
   }
+
+  /**
+   * Encerra o canal BroadcastChannel e remove todos os listeners da instância.
+   */
+  destroy() {
+    if (this.channel) {
+      try {
+        this.channel.close();
+      } catch (_) {}
+      this.channel = null;
+    }
+    this.listeners.clear();
+  }
 }
 
 // Exporta um singleton

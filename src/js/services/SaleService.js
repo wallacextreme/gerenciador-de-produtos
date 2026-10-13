@@ -5,6 +5,8 @@ import { executeTransaction } from '../db/transactions.js';
 import { MarginService } from '../domain/MarginService.js';
 import { eventBus, EVENTS } from '../eventBus.js';
 import { SaleValidator, PAYMENT_METHODS } from '../validators/SaleValidator.js';
+import { assertPermission } from '../utils/authGuard.js';
+import { authService } from './AuthService.js';
 
 export class SaleService {
   /**
@@ -16,6 +18,9 @@ export class SaleService {
    * @returns {Promise<Object>} Dados da venda criada
    */
   static async recordSale(saleData) {
+    // 0. Validação de Autorização (Offline-First Guard)
+    assertPermission('create', 'sales');
+
     // 1. Validação de Domínio
     SaleValidator.assertValid(saleData);
 
@@ -44,6 +49,8 @@ export class SaleService {
         );
       }
 
+      const currentTenant = saleData.tenantId || product.tenantId || authService.getTenantId() || null;
+
       // 3. Determinar preços e snapshot imutável de custo e lucro
       const unitSalePriceCents = saleData.unitSalePriceCents !== undefined && saleData.unitSalePriceCents !== null
         ? saleData.unitSalePriceCents
@@ -64,6 +71,7 @@ export class SaleService {
       const saleRecord = {
         id: saleId,
         productId: product.id,
+        tenantId: currentTenant,
         productName: product.name,
         productCode: product.productCode || '',
         quantity,
@@ -91,6 +99,7 @@ export class SaleService {
       const movementRecord = {
         id: movementId,
         productId: product.id,
+        tenantId: currentTenant,
         type: 'SALE',
         quantity,
         delta: -quantity,
@@ -114,8 +123,11 @@ export class SaleService {
       await stores.products.put(product);
 
       result = {
+        ...saleRecord,
+        id: saleId,
         saleId,
         productId: product.id,
+        tenantId: currentTenant,
         productName: product.name,
         quantity,
         unitSalePriceCents,
@@ -131,13 +143,21 @@ export class SaleService {
     // 7. Notificar listeners via EventBus (BroadcastChannel)
     eventBus.emit(EVENTS.SALE_CREATED, result);
     eventBus.emit(EVENTS.STOCK_CHANGED, {
+      id: movementId,
+      movementId,
       productId: result.productId,
+      tenantId: result.tenantId,
       newStock: result.newStock,
+      quantity: result.quantity,
       delta: -result.quantity,
-      type: 'SALE'
+      type: 'SALE',
+      unitCostCents: result.unitCostCents,
+      referenceId: saleId,
+      referenceType: 'SALE'
     });
     eventBus.emit(EVENTS.PRODUCT_UPDATED, {
       id: result.productId,
+      tenantId: result.tenantId,
       action: 'sale'
     });
 
@@ -151,6 +171,9 @@ export class SaleService {
    * @param {string} reason 
    */
   static async cancelSale(saleId, reason = '') {
+    // 0. Validação de Autorização (Offline-First Guard)
+    assertPermission('update', 'sales');
+
     let result = null;
 
     await executeTransaction(['sales', 'stockMovements', 'products'], 'readwrite', async (stores) => {
@@ -161,6 +184,7 @@ export class SaleService {
       const product = await stores.products.get(sale.productId);
       if (!product) throw new Error('Produto vinculado à venda não encontrado.');
 
+      const currentTenant = sale.tenantId || product.tenantId || authService.getTenantId() || null;
       const currentStock = product.stockQuantity || 0;
       const newStock = currentStock + sale.quantity;
       const returnMovementId = crypto.randomUUID();
@@ -176,6 +200,7 @@ export class SaleService {
       const returnMovement = {
         id: returnMovementId,
         productId: product.id,
+        tenantId: currentTenant,
         type: 'RETURN',
         quantity: sale.quantity,
         delta: sale.quantity,
@@ -201,6 +226,7 @@ export class SaleService {
       result = {
         saleId,
         productId: product.id,
+        tenantId: currentTenant,
         restoredQuantity: sale.quantity,
         newStock
       };
@@ -208,17 +234,20 @@ export class SaleService {
 
     eventBus.emit(EVENTS.STOCK_CHANGED, {
       productId: result.productId,
+      tenantId: result.tenantId,
       newStock: result.newStock,
       delta: result.restoredQuantity,
       type: 'RETURN'
     });
     eventBus.emit(EVENTS.PRODUCT_UPDATED, {
       id: result.productId,
+      tenantId: result.tenantId,
       action: 'sale_cancel'
     });
 
     return result;
   }
+
 
   /**
    * Retorna consolidação de vendas com métricas financeiras e ranking de produtos.

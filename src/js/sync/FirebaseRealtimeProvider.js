@@ -13,9 +13,14 @@ import {
   serverTimestamp,
   goOnline,
   goOffline,
-  connectDatabaseEmulator
+  connectDatabaseEmulator,
+  runTransaction
 } from 'firebase/database';
 import { validateFirebaseConfig } from '../utils/firebaseConfigValidator.js';
+import {
+  arePayloadsEquivalent,
+  computeCanonicalPayloadHash
+} from '../utils/operationIdentity.js';
 
 /**
  * GestãoPro — Provedor Oficial do Firebase Realtime Database (PHASE 03)
@@ -64,7 +69,7 @@ export class FirebaseRealtimeProvider extends CloudProvider {
   }
 
   isConfigured() {
-    return !!(this.config && (this.config.databaseURL || (this.config.apiKey && this.config.projectId)));
+    return !!(this.db || (this.config && (this.config.databaseURL || (this.config.apiKey && this.config.projectId))));
   }
 
   getTenantId() {
@@ -82,6 +87,15 @@ export class FirebaseRealtimeProvider extends CloudProvider {
 
   isConnected() {
     return this._connected;
+  }
+
+  /**
+   * Mapeia tipos de entidade locais para o nó correspondente no Realtime Database.
+   * Local: stockMovements -> RTDB: inventory (conforme regras em database.rules.json).
+   */
+  _getRemoteCollection(entityType) {
+    if (entityType === 'stockMovements') return 'inventory';
+    return entityType;
   }
 
   async initialize(config = null) {
@@ -162,9 +176,22 @@ export class FirebaseRealtimeProvider extends CloudProvider {
       if (!this.db) throw new Error('Realtime Database não inicializado.');
     }
 
-    const tenantId = this.getTenantId();
+    const activeTenant = this.getTenantId();
+    if (this.authService && (this.authService.isConfigured() || this.authService.getCurrentSession())) {
+      if (!changeItem.tenantId) {
+        throw new Error('[FirebaseRealtimeProvider] Operação rejeitada: item da fila não possui tenantId definido.');
+      }
+      if (activeTenant && changeItem.tenantId !== activeTenant) {
+        throw new Error(`[FirebaseRealtimeProvider] Violação de isolamento multi-tenant: operação pertence ao tenant "${changeItem.tenantId}", mas a sessão ativa pertence a "${activeTenant}".`);
+      }
+    } else if (changeItem.tenantId && activeTenant && changeItem.tenantId !== activeTenant) {
+      throw new Error(`[FirebaseRealtimeProvider] Violação de isolamento multi-tenant: operação pertence ao tenant "${changeItem.tenantId}", mas a sessão ativa pertence a "${activeTenant}".`);
+    }
+
+    const tenantId = changeItem.tenantId || activeTenant;
     const { entityType, entityId, action, payload } = changeItem;
-    const path = `tenants/${tenantId}/${entityType}/${entityId}`;
+    const remoteCollection = this._getRemoteCollection(entityType);
+    const path = `tenants/${tenantId}/${remoteCollection}/${entityId}`;
     const targetRef = ref(this.db, path);
     const mutationId = changeItem.id || `mut_${Date.now()}`;
     const timestamp = new Date().toISOString();
@@ -173,26 +200,222 @@ export class FirebaseRealtimeProvider extends CloudProvider {
     this._processedMutations.add(mutationId);
 
     try {
-      if (action === 'DELETE') {
-        // Soft delete no nó do RTDB com marcação explícita
-        await update(targetRef, {
-          deletedAt: timestamp,
-          updatedAt: timestamp,
-          lastMutationId: mutationId,
-          sourceDeviceId: this.deviceId
-        });
-      } else {
-        const docData = {
-          ...payload,
-          id: entityId,
-          sourceDeviceId: this.deviceId,
-          lastMutationId: mutationId,
-          updatedAt: payload?.updatedAt || timestamp,
-          version: payload?.version !== undefined ? payload.version : 1,
-          _serverTimestamp: serverTimestamp()
-        };
+      let abortReason = null;
+      let abortRemoteRecord = null;
 
-        await set(targetRef, docData);
+      let initialSnap = null;
+      if (action === 'UPDATE' || action === 'DELETE') {
+        try {
+          initialSnap = await get(targetRef);
+        } catch (_) {}
+      }
+
+      const txResult = await runTransaction(targetRef, (currentData) => {
+        if (action === 'DELETE') {
+          if (currentData === null) {
+            if (initialSnap && !initialSnap.exists()) {
+              abortReason = 'RECORD_ABSENT';
+              abortRemoteRecord = null;
+              return undefined;
+            }
+            const preVal = initialSnap ? initialSnap.val() : null;
+            const currentVer = preVal?.version || 1;
+            return {
+              ...(preVal || {}),
+              id: entityId,
+              deletedAt: timestamp,
+              updatedAt: timestamp,
+              lastMutationId: mutationId,
+              sourceDeviceId: this.deviceId,
+              baseVersion: currentVer,
+              version: currentVer + 1
+            };
+          }
+          if (currentData.deletedAt) {
+            abortReason = 'RECORD_EQUIVALENT';
+            abortRemoteRecord = currentData;
+            return undefined;
+          }
+          const currentVer = currentData.version || 1;
+          return {
+            ...currentData,
+            deletedAt: timestamp,
+            updatedAt: timestamp,
+            lastMutationId: mutationId,
+            sourceDeviceId: this.deviceId,
+            baseVersion: currentVer,
+            version: currentVer + 1
+          };
+        }
+
+        if (action === 'CREATE') {
+          if (currentData === null) {
+            const cleanCreatePayload = { ...payload };
+            delete cleanCreatePayload.baseVersion;
+            delete cleanCreatePayload.expectedBaseVersion;
+            delete cleanCreatePayload.basePayloadHash;
+            if (entityType === 'stockMovements' || entityType === 'inventory') {
+              delete cleanCreatePayload.tenantId;
+            }
+            return {
+              ...cleanCreatePayload,
+              id: entityId,
+              sourceDeviceId: this.deviceId,
+              lastMutationId: mutationId,
+              updatedAt: payload?.updatedAt || timestamp,
+              version: entityType === 'products' ? 1 : (payload?.version !== undefined ? payload.version : 1),
+              _serverTimestamp: serverTimestamp()
+            };
+          }
+          // Registro já existe remotamente
+          if (arePayloadsEquivalent(entityType, { ...payload, id: entityId }, currentData)) {
+            abortReason = 'RECORD_EQUIVALENT';
+            abortRemoteRecord = currentData;
+            return undefined; // Já aplicado, não gera segundo efeito
+          } else {
+            abortReason = 'RECORD_DIVERGENT';
+            abortRemoteRecord = currentData;
+            return undefined; // Conflito: não sobrescreve registro divergente
+          }
+        }
+
+        if (action === 'UPDATE') {
+          const expectedBase = payload?.baseVersion ?? payload?.expectedBaseVersion;
+          if (currentData === null) {
+            // Ciclo preliminar local: propõe mutação com próxima versão para o servidor avaliar contra o estado real
+            const nextVersion = (expectedBase !== undefined && expectedBase !== null)
+              ? expectedBase + 1
+              : (payload?.version !== undefined ? payload.version : 1);
+            return {
+              ...payload,
+              id: entityId,
+              sourceDeviceId: this.deviceId,
+              lastMutationId: mutationId,
+              updatedAt: payload?.updatedAt || timestamp,
+              version: nextVersion,
+              _serverTimestamp: serverTimestamp()
+            };
+          }
+          if (arePayloadsEquivalent(entityType, { ...payload, id: entityId }, currentData)) {
+            abortReason = 'RECORD_EQUIVALENT';
+            abortRemoteRecord = currentData;
+            return undefined;
+          }
+
+          if (currentData.version === undefined) {
+            abortReason = 'UNVERSIONED_LEGACY_PROTECTED';
+            abortRemoteRecord = currentData;
+            return undefined;
+          }
+
+          // Verificação de concorrência otimista (Base Version)
+          if (expectedBase !== undefined && expectedBase !== null) {
+            const currentVer = currentData.version || 1;
+            if (currentVer !== expectedBase) {
+              abortReason = 'VERSION_CONFLICT';
+              abortRemoteRecord = currentData;
+              return undefined;
+            }
+          } else if (currentData.version !== undefined) {
+            abortReason = 'MISSING_BASE_VERSION';
+            abortRemoteRecord = currentData;
+            return undefined;
+          }
+
+          if (payload?.basePayloadHash) {
+            const currentHash = computeCanonicalPayloadHash(entityType, currentData);
+            if (currentHash !== payload.basePayloadHash) {
+              abortReason = 'BASE_HASH_CONFLICT';
+              abortRemoteRecord = currentData;
+              return undefined;
+            }
+          }
+
+          const currentVer = currentData.version || 1;
+          const nextVersion = currentVer + 1;
+          const merged = {
+            ...currentData,
+            ...payload,
+            id: entityId,
+            sourceDeviceId: this.deviceId,
+            lastMutationId: mutationId,
+            updatedAt: payload?.updatedAt || timestamp,
+            baseVersion: currentVer,
+            version: nextVersion,
+            _serverTimestamp: serverTimestamp()
+          };
+          delete merged.expectedBaseVersion;
+          delete merged.basePayloadHash;
+          return merged;
+        }
+
+        return currentData;
+      }, { applyLocally: false });
+
+      if (txResult && txResult.committed) {
+        return {
+          success: true,
+          remoteId: entityId,
+          remoteVersion: timestamp
+        };
+      }
+
+      const finalSnapshotVal = (txResult && txResult.snapshot) ? txResult.snapshot.val() : abortRemoteRecord;
+
+      if (abortReason === 'RECORD_EQUIVALENT') {
+        return {
+          success: true,
+          alreadyApplied: true,
+          remoteId: entityId,
+          remoteVersion: finalSnapshotVal?.updatedAt || finalSnapshotVal?._serverTimestamp || timestamp
+        };
+      }
+
+      if (abortReason === 'RECORD_DIVERGENT') {
+        const err = new Error(`Conflito de integridade: registro remoto "${entityId}" já existe no destino com dados divergentes.`);
+        err.code = 'concurrency_conflict';
+        err.errorCategory = 'payload_divergence_conflict';
+        err.remoteRecord = finalSnapshotVal;
+        throw err;
+      }
+
+      if (abortReason === 'VERSION_CONFLICT') {
+        const err = new Error(`Conflito de concorrência: registro "${entityId}" foi alterado concorrentemente (versão remota v${finalSnapshotVal?.version || 1} difere da versão esperada).`);
+        err.code = 'concurrency_conflict';
+        err.errorCategory = 'version_conflict';
+        err.remoteRecord = finalSnapshotVal;
+        throw err;
+      }
+
+      if (abortReason === 'BASE_HASH_CONFLICT') {
+        const err = new Error(`Conflito de concorrência: registro "${entityId}" sofreu mutação concorrente por outro dispositivo.`);
+        err.code = 'concurrency_conflict';
+        err.errorCategory = 'payload_divergence_conflict';
+        err.remoteRecord = finalSnapshotVal;
+        throw err;
+      }
+
+      if (abortReason === 'UNVERSIONED_LEGACY_PROTECTED') {
+        const err = new Error(`Registro legado não versionado "${entityId}" é protegido contra mutações diretas.`);
+        err.code = 'concurrency_conflict';
+        err.errorCategory = 'unversioned_legacy_conflict';
+        err.remoteRecord = finalSnapshotVal;
+        throw err;
+      }
+
+      if (abortReason === 'MISSING_BASE_VERSION') {
+        const err = new Error(`Conflito de integridade: atualização do registro versionado "${entityId}" requer baseVersion.`);
+        err.code = 'concurrency_conflict';
+        err.errorCategory = 'missing_base_version';
+        err.remoteRecord = finalSnapshotVal;
+        throw err;
+      }
+
+      if (abortReason === 'RECORD_ABSENT') {
+        const err = new Error(`Registro "${entityId}" não encontrado no servidor para atualização.`);
+        err.code = 'not_found';
+        err.errorCategory = 'permanent';
+        throw err;
       }
 
       return {
@@ -201,8 +424,31 @@ export class FirebaseRealtimeProvider extends CloudProvider {
         remoteVersion: timestamp
       };
     } catch (err) {
+      if (err.code === 'concurrency_conflict' || err.code === 'not_found' || err.errorCategory) {
+        throw err;
+      }
       throw new Error(`Falha na sincronização remota: ${err.message}`);
     }
+  }
+
+  /**
+   * Consulta diretamente um registro remoto no Realtime Database pelo entityType e entityId.
+   * Suporta reconciliação pré-despacho, recuperação pós-crash e verificação de equivalência.
+   * @param {string} entityType
+   * @param {string} entityId
+   * @returns {Promise<Object|null>}
+   */
+  async get(entityType, entityId) {
+    if (!this.isConfigured() || !this.db) {
+      await this.initialize();
+      if (!this.db) throw new Error('Realtime Database não inicializado.');
+    }
+    const tenantId = this.getTenantId();
+    const remoteCollection = this._getRemoteCollection(entityType);
+    const itemRef = ref(this.db, `tenants/${tenantId}/${remoteCollection}/${entityId}`);
+    const snapshot = await get(itemRef);
+    if (!snapshot.exists()) return null;
+    return snapshot.val();
   }
 
   async pullChanges(entityType, sinceTimestamp = null) {
@@ -212,7 +458,8 @@ export class FirebaseRealtimeProvider extends CloudProvider {
     }
 
     const tenantId = this.getTenantId();
-    const collRef = ref(this.db, `tenants/${tenantId}/${entityType}`);
+    const remoteCollection = this._getRemoteCollection(entityType);
+    const collRef = ref(this.db, `tenants/${tenantId}/${remoteCollection}`);
     const snapshot = await get(collRef);
 
     if (!snapshot.exists()) {
@@ -237,7 +484,8 @@ export class FirebaseRealtimeProvider extends CloudProvider {
   async get(entityType, id) {
     if (!this.db) await this.initialize();
     const tenantId = this.getTenantId();
-    const itemRef = ref(this.db, `tenants/${tenantId}/${entityType}/${id}`);
+    const remoteCollection = this._getRemoteCollection(entityType);
+    const itemRef = ref(this.db, `tenants/${tenantId}/${remoteCollection}/${id}`);
     const snap = await get(itemRef);
     return snap.exists() ? snap.val() : null;
   }
@@ -304,7 +552,8 @@ export class FirebaseRealtimeProvider extends CloudProvider {
     if (typeof callback !== 'function') throw new Error('Callback deve ser uma função.');
 
     const tenantId = this.getTenantId();
-    const targetPath = `tenants/${tenantId}/${entityType}`;
+    const remoteCollection = this._getRemoteCollection(entityType);
+    const targetPath = `tenants/${tenantId}/${remoteCollection}`;
 
     if (!this._subscriptions.has(targetPath)) {
       this._subscriptions.set(targetPath, new Map());
@@ -365,7 +614,8 @@ export class FirebaseRealtimeProvider extends CloudProvider {
 
   unsubscribe(entityType, callback) {
     const tenantId = this.getTenantId();
-    const targetPath = `tenants/${tenantId}/${entityType}`;
+    const remoteCollection = this._getRemoteCollection(entityType);
+    const targetPath = `tenants/${tenantId}/${remoteCollection}`;
     const pathSubs = this._subscriptions.get(targetPath);
     if (pathSubs && pathSubs.has(callback)) {
       const fbUnsub = pathSubs.get(callback);

@@ -255,10 +255,15 @@ describe('Firebase Realtime Database — Camada de Nuvem e Anti-Loop (PHASE 03)'
         origin: 'local'
       });
 
-      // Aguarda processamento assíncrono do listener do EventBus
-      await new Promise(r => setTimeout(r, 60));
+      // Aguarda deterministicamente a inclusão do item na fila do Outbox (polling com teto de 1000ms)
+      const start = Date.now();
+      let pending = [];
+      while (Date.now() - start < 1000) {
+        pending = await syncRepo.getPending();
+        if (pending.length >= 1) break;
+        await new Promise(r => setTimeout(r, 10));
+      }
 
-      const pending = await syncRepo.getPending();
       expect(pending.length).toBe(1);
       expect(pending[0].entityId).toBe('prod_local_001');
       expect(pending[0].entityType).toBe('products');
@@ -460,7 +465,7 @@ describe('Firebase Realtime Database — Camada de Nuvem e Anti-Loop (PHASE 03)'
       const rules = JSON.parse(readFileSync(join(process.cwd(), 'database.rules.json'), 'utf-8'));
       const settingsRule = rules.rules.tenants.$tenantId.settings.$settingKey['.write'];
       
-      expect(settingsRule).toContain("role === 'admin'");
+      expect(settingsRule).toContain("appRole === 'admin'");
     });
   });
 

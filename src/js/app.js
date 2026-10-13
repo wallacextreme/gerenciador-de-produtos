@@ -178,6 +178,11 @@ export class App {
           </div>
         </header>
 
+        <!-- Migration Notice Banner (when requiresMigration === true) -->
+        <div id="migration-banner-container">
+          ${this._renderMigrationBanner(session)}
+        </div>
+
         <!-- Scrollable Content Region -->
         <div id="main-content" class="flex-1 overflow-auto p-6">
           <!-- Router injects views here -->
@@ -186,16 +191,43 @@ export class App {
     `;
   }
 
+  _renderMigrationBanner(session) {
+    if (session && session.authenticated && session.requiresMigration) {
+      return `
+        <div id="migration-notice-bar" class="bg-amber-50 border-b border-amber-200 px-6 py-2.5 text-xs text-amber-900 flex items-center justify-between gap-4" role="alert">
+          <div class="flex items-center gap-2.5">
+            <svg class="w-4 h-4 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <span><strong>Aviso de Permissões:</strong> Sua conta está autenticada, mas aguarda regularização administrativa de claims (papel comercial). Operações protegidas de gravação permanecerão restritas até que o administrador conclua o provisionamento.</span>
+          </div>
+        </div>
+      `;
+    }
+    return '';
+  }
+
   _renderAuthBadge(session) {
     if (session && session.authenticated) {
-      const email = session.email || 'Operador';
-      const roleLabel = session.role === 'admin' ? 'Admin' : 'Operador';
+      const email = session.email || 'Usuário';
+      let roleLabel = 'Visualizador';
+      if (session.role === 'admin') {
+        roleLabel = 'Admin';
+      } else if (session.role === 'operator') {
+        roleLabel = 'Operador';
+      }
+
+      const migrationWarningBadge = session.requiresMigration
+        ? `<span class="text-[9px] bg-amber-100 text-amber-800 border border-amber-200 px-1 py-0.2 rounded font-bold uppercase" title="Esta conta necessita de regularização administrativa de permissões.">Aguardando Regularização</span>`
+        : '';
+
       return `
         <div class="flex items-center gap-2 pl-2 border-l border-slate-200">
           <div class="flex items-center gap-1.5 bg-slate-100 text-slate-700 px-2 py-1 rounded-lg text-xs font-medium">
-            <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span class="w-2 h-2 rounded-full ${session.requiresMigration ? 'bg-amber-500' : 'bg-emerald-500'}"></span>
             <span class="truncate max-w-[120px]" title="${email}">${email}</span>
             <span class="text-[9px] bg-slate-200 text-slate-600 px-1 py-0.2 rounded font-bold uppercase">${roleLabel}</span>
+            ${migrationWarningBadge}
           </div>
           <button id="btn-header-logout" class="p-1 text-slate-400 hover:text-rose-600 transition-colors" title="Encerrar Sessão">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -321,15 +353,20 @@ export class App {
     // Carrega status inicial do SyncEngine
     syncEngine.getStats().then(stats => updateSyncUI(stats)).catch(() => {});
 
-    // 3. Atualização do Badge de Sessão / Auth State
+    // 3. Atualização do Badge de Sessão / Auth State e Banner de Migração
     const updateAuthUI = (session) => {
       if (this.authBadgeEl) {
         this.authBadgeEl.innerHTML = this._renderAuthBadge(session);
         this._bindLogoutButton();
       }
+      const migrationContainer = this.rootElement.querySelector('#migration-banner-container');
+      if (migrationContainer) {
+        migrationContainer.innerHTML = this._renderMigrationBanner(session);
+      }
     };
 
-    const unsubAuth = eventBus.on(EVENTS.AUTH_STATE_CHANGED, (session) => {
+    const unsubAuth = eventBus.on(EVENTS.AUTH_STATE_CHANGED, (payload) => {
+      const session = payload && payload.session !== undefined ? payload.session : payload;
       updateAuthUI(session);
     });
     this.cleanupFns.push(unsubAuth);

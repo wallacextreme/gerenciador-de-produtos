@@ -1,5 +1,6 @@
-import { BaseRepository } from './BaseRepository.js';
+import { BaseRepository, getCurrentTenant } from './BaseRepository.js';
 import { getDB } from '../db/connection.js';
+import { executeTransaction } from '../db/transactions.js';
 
 /**
  * Repositório Local para a store `imageManifest` no IndexedDB (PHASE 05).
@@ -23,17 +24,32 @@ export class ImageManifestRepository extends BaseRepository {
       throw new Error('[ImageManifestRepository] photoId é obrigatório para criação.');
     }
     const photoId = data.photoId || data.id;
-    const entry = {
-      ...data,
-      photoId,
-      id: photoId,
-      version: typeof data.version === 'number' ? data.version : 1,
-      createdAt: data.createdAt || new Date().toISOString(),
-      updatedAt: data.updatedAt || Date.now()
-    };
-    const db = await getDB();
-    await db.add(this.storeName, entry);
-    return entry;
+    const targetTenant = data.tenantId || getCurrentTenant();
+    const targetProductId = data.productId;
+
+    return await executeTransaction([this.storeName], 'readwrite', async (stores) => {
+      const store = stores[this.storeName];
+      const raw = await store.get(photoId);
+      if (raw) {
+        if (raw.tenantId && targetTenant && raw.tenantId !== targetTenant) {
+          throw new Error(`[ImageManifestRepository] Violação de isolamento multi-tenant: photoId "${photoId}" pertence ao tenant "${raw.tenantId}".`);
+        }
+        if (raw.productId && targetProductId && raw.productId !== targetProductId) {
+          throw new Error(`[ImageManifestRepository] Conflito de integridade: photoId "${photoId}" já está associado ao produto "${raw.productId}".`);
+        }
+      }
+      const entry = {
+        ...data,
+        photoId,
+        id: photoId,
+        tenantId: targetTenant || data.tenantId,
+        version: typeof data.version === 'number' ? data.version : 1,
+        createdAt: data.createdAt || new Date().toISOString(),
+        updatedAt: data.updatedAt || Date.now()
+      };
+      await store.add(entry);
+      return entry;
+    });
   }
 
   /**
@@ -46,19 +62,37 @@ export class ImageManifestRepository extends BaseRepository {
     if (!photoId) {
       throw new Error('[ImageManifestRepository] photoId é obrigatório para atualização.');
     }
-    const entry = {
-      ...data,
-      photoId,
-      id: photoId,
-      updatedAt: data.updatedAt || Date.now()
-    };
-    const db = await getDB();
-    await db.put(this.storeName, entry);
-    return entry;
+    const targetTenant = data.tenantId || getCurrentTenant();
+    const targetProductId = data.productId;
+
+    return await executeTransaction([this.storeName], 'readwrite', async (stores) => {
+      const store = stores[this.storeName];
+      const raw = await store.get(photoId);
+      if (!raw) {
+        throw new Error(`[ImageManifestRepository] Registro "${photoId}" não encontrado para atualização.`);
+      }
+      if (raw.tenantId && targetTenant && raw.tenantId !== targetTenant) {
+        throw new Error(`[ImageManifestRepository] Violação de isolamento multi-tenant: photoId "${photoId}" pertence ao tenant "${raw.tenantId}".`);
+      }
+      if (raw.productId && targetProductId && raw.productId !== targetProductId) {
+        throw new Error(`[ImageManifestRepository] Conflito de integridade: photoId "${photoId}" já está associado ao produto "${raw.productId}".`);
+      }
+      const entry = {
+        ...raw,
+        ...data,
+        photoId,
+        id: photoId,
+        tenantId: raw.tenantId || targetTenant,
+        updatedAt: data.updatedAt || Date.now()
+      };
+      await store.put(entry);
+      return entry;
+    });
   }
 
   /**
-   * Insere ou atualiza de forma idempotente.
+   * Insere ou atualiza de forma idempotente com isolamento multi-tenant estrito.
+   * Impede sobrescrita silenciosa de dados de outro tenant ou produto.
    * @param {Object} data 
    * @returns {Promise<Object>}
    */
@@ -67,12 +101,49 @@ export class ImageManifestRepository extends BaseRepository {
     if (!photoId) {
       throw new Error('[ImageManifestRepository] photoId é obrigatório para upsert.');
     }
-    const existing = await this.findByPhotoId(photoId);
-    if (existing) {
-      return this.update({ ...existing, ...data, photoId, id: photoId });
-    } else {
-      return this.create(data);
-    }
+    const targetTenant = data.tenantId || getCurrentTenant();
+    const targetProductId = data.productId;
+
+    return await executeTransaction([this.storeName], 'readwrite', async (stores) => {
+      const store = stores[this.storeName];
+      const raw = await store.get(photoId);
+
+      if (raw) {
+        // Validação estrita de isolamento multi-tenant
+        if (raw.tenantId && targetTenant && raw.tenantId !== targetTenant) {
+          throw new Error(`[ImageManifestRepository] Violação de isolamento multi-tenant: photoId "${photoId}" pertence ao tenant "${raw.tenantId}".`);
+        }
+        // Validação estrita de integridade de produto
+        if (raw.productId && targetProductId && raw.productId !== targetProductId) {
+          throw new Error(`[ImageManifestRepository] Conflito de integridade: photoId "${photoId}" já está associado ao produto "${raw.productId}".`);
+        }
+        const updatedEntry = {
+          ...raw,
+          ...data,
+          photoId,
+          id: photoId,
+          tenantId: raw.tenantId || targetTenant,
+          productId: raw.productId || targetProductId,
+          version: typeof data.version === 'number' ? data.version : (raw.version || 1) + 1,
+          createdAt: raw.createdAt || data.createdAt || new Date().toISOString(),
+          updatedAt: data.updatedAt || Date.now()
+        };
+        await store.put(updatedEntry);
+        return updatedEntry;
+      }
+
+      const newEntry = {
+        ...data,
+        photoId,
+        id: photoId,
+        tenantId: targetTenant || data.tenantId,
+        version: typeof data.version === 'number' ? data.version : 1,
+        createdAt: data.createdAt || new Date().toISOString(),
+        updatedAt: data.updatedAt || Date.now()
+      };
+      await store.put(newEntry);
+      return newEntry;
+    });
   }
 
   /**
@@ -80,11 +151,16 @@ export class ImageManifestRepository extends BaseRepository {
    * @param {string} photoId 
    * @returns {Promise<Object|null>}
    */
-  async findByPhotoId(photoId) {
+  async findByPhotoId(photoId, options = {}) {
     if (!photoId) return null;
     const db = await getDB();
     const result = await db.get(this.storeName, photoId);
-    return result || null;
+    if (!result) return null;
+    const curTenant = options?.tenantId || getCurrentTenant();
+    if (curTenant && result.tenantId !== curTenant) {
+      return null;
+    }
+    return result;
   }
 
   /**
@@ -95,14 +171,20 @@ export class ImageManifestRepository extends BaseRepository {
   }
 
   /**
-   * Retorna todas as fotos registradas de um produto específico.
+   * Retorna todas as fotos registradas de um produto específico no escopo do tenant.
    * @param {string} productId 
+   * @param {Object} [options] { tenantId }
    * @returns {Promise<Array>}
    */
-  async findByProductId(productId) {
+  async findByProductId(productId, options = {}) {
     if (!productId) return [];
     const db = await getDB();
-    return db.getAllFromIndex(this.storeName, 'productId', productId);
+    const photos = await db.getAllFromIndex(this.storeName, 'productId', productId);
+    const curTenant = options?.tenantId || getCurrentTenant();
+    if (curTenant) {
+      return photos.filter(p => p.tenantId === curTenant);
+    }
+    return photos;
   }
 
   /**
@@ -133,31 +215,47 @@ export class ImageManifestRepository extends BaseRepository {
 
   /**
    * Salva múltiplas entradas em lote dentro de uma única transação atômica.
+   * Aplica validações estritas de isolamento multi-tenant e integridade por produto.
    * @param {Array<Object>} entries 
    * @returns {Promise<Array>}
    */
   async saveAll(entries = []) {
     if (!Array.isArray(entries) || entries.length === 0) return [];
-    const db = await getDB();
-    const tx = db.transaction(this.storeName, 'readwrite');
-    const store = tx.objectStore(this.storeName);
-    const results = [];
+    return await executeTransaction([this.storeName], 'readwrite', async (stores) => {
+      const store = stores[this.storeName];
+      const results = [];
+      const curTenant = getCurrentTenant();
 
-    for (const data of entries) {
-      const photoId = data.photoId || data.id;
-      if (!photoId) continue;
-      const entry = {
-        ...data,
-        photoId,
-        id: photoId,
-        updatedAt: data.updatedAt || Date.now()
-      };
-      await store.put(entry);
-      results.push(entry);
-    }
+      for (const data of entries) {
+        const photoId = data.photoId || data.id;
+        if (!photoId) continue;
+        const targetTenant = data.tenantId || curTenant;
+        const targetProductId = data.productId;
 
-    await tx.done;
-    return results;
+        const raw = await store.get(photoId);
+        if (raw) {
+          if (raw.tenantId && targetTenant && raw.tenantId !== targetTenant) {
+            throw new Error(`[ImageManifestRepository] Violação de isolamento multi-tenant: photoId "${photoId}" pertence ao tenant "${raw.tenantId}".`);
+          }
+          if (raw.productId && targetProductId && raw.productId !== targetProductId) {
+            throw new Error(`[ImageManifestRepository] Conflito de integridade: photoId "${photoId}" já está associado ao produto "${raw.productId}".`);
+          }
+        }
+
+        const entry = {
+          ...(raw || {}),
+          ...data,
+          photoId,
+          id: photoId,
+          tenantId: (raw && raw.tenantId) || targetTenant,
+          productId: (raw && raw.productId) || targetProductId,
+          updatedAt: data.updatedAt || Date.now()
+        };
+        await store.put(entry);
+        results.push(entry);
+      }
+      return results;
+    });
   }
 
   /**

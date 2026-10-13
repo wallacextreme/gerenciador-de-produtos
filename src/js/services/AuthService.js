@@ -1,6 +1,7 @@
 import { FirebaseAuthProvider } from '../auth/FirebaseAuthProvider.js';
 import { MockAuthProvider } from '../auth/MockAuthProvider.js';
 import { settingsRepository } from '../repositories/SettingsRepository.js';
+import { setTenantResolver } from '../repositories/BaseRepository.js';
 import { eventBus, EVENTS } from '../eventBus.js';
 
 export const AUTH_STATES = {
@@ -114,7 +115,16 @@ export class AuthService {
    * @param {AuthProvider} provider 
    */
   setProvider(provider) {
-    if (!provider) return;
+    if (!provider) {
+      if (this._unsubscribeProvider) {
+        this._unsubscribeProvider();
+        this._unsubscribeProvider = null;
+      }
+      this.provider = null;
+      this.currentSession = null;
+      this.state = AUTH_STATES.UNAUTHENTICATED;
+      return;
+    }
     if (this._unsubscribeProvider) {
       this._unsubscribeProvider();
       this._unsubscribeProvider = null;
@@ -273,6 +283,7 @@ export class AuthService {
       this._unsubscribeProvider = null;
     }
     this._listeners.clear();
+    this.provider = new FirebaseAuthProvider();
     this.currentSession = null;
     this.state = AUTH_STATES.UNAUTHENTICATED;
     this._initialized = false;
@@ -280,3 +291,4 @@ export class AuthService {
 }
 
 export const authService = new AuthService();
+setTenantResolver(() => authService.getTenantId());

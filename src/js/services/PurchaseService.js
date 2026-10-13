@@ -5,6 +5,8 @@ import { stockMovementRepository } from '../repositories/StockMovementRepository
 import { executeTransaction } from '../db/transactions.js';
 import { PurchaseValidator } from '../validators/PurchaseValidator.js';
 import { eventBus, EVENTS } from '../eventBus.js';
+import { assertPermission } from '../utils/authGuard.js';
+import { authService } from './AuthService.js';
 
 export class PurchaseService {
   /**
@@ -15,6 +17,9 @@ export class PurchaseService {
    * @returns {Promise<Object>} Dados da compra registrada
    */
   static async recordPurchase(purchaseData) {
+    // 0. Validação de Autorização (Offline-First Guard - Exclusivo para admin)
+    assertPermission('create', 'purchases');
+
     PurchaseValidator.assertValid(purchaseData);
 
     const purchaseId = crypto.randomUUID();
@@ -34,6 +39,7 @@ export class PurchaseService {
         throw new Error('Fornecedor não encontrado ou inativo.');
       }
 
+      const currentTenant = purchaseData.tenantId || product.tenantId || supplier.tenantId || authService.getTenantId() || null;
       const quantity = purchaseData.quantity;
       const unitCostCents = purchaseData.unitCostCents !== undefined && purchaseData.unitCostCents !== null
         ? purchaseData.unitCostCents
@@ -48,6 +54,7 @@ export class PurchaseService {
       // 3. Criar registro em purchases
       const purchaseRecord = {
         id: purchaseId,
+        tenantId: currentTenant,
         supplierId: supplier.id,
         supplierName: supplier.name,
         productId: product.id,
@@ -56,6 +63,7 @@ export class PurchaseService {
         quantity,
         unitCostCents,
         totalCostCents,
+        totalAmountCents: totalCostCents,
         invoiceNumber: purchaseData.invoiceNumber ? purchaseData.invoiceNumber.trim() : '',
         paymentMethod: purchaseData.paymentMethod || 'OUTRO',
         notes: purchaseData.notes ? purchaseData.notes.trim() : '',
@@ -73,6 +81,7 @@ export class PurchaseService {
       const movementRecord = {
         id: movementId,
         productId: product.id,
+        tenantId: currentTenant,
         type: 'PURCHASE',
         quantity,
         delta: quantity,
@@ -98,28 +107,42 @@ export class PurchaseService {
       await stores.products.put(product);
 
       result = {
+        id: purchaseId,
         purchaseId,
         productId: product.id,
+        tenantId: currentTenant,
         productName: product.name,
         supplierId: supplier.id,
         supplierName: supplier.name,
         quantity,
         unitCostCents,
         totalCostCents,
+        totalAmountCents: totalCostCents,
+        date: purchaseDate,
+        createdAt: nowIso,
+        updatedAt: nowIso,
         previousStock,
         newStock
       };
     });
 
-    eventBus.emit('PURCHASE_CREATED', result);
+    eventBus.emit(EVENTS.PURCHASE_CREATED, result);
     eventBus.emit(EVENTS.STOCK_CHANGED, {
+      id: movementId,
+      movementId,
       productId: result.productId,
+      tenantId: result.tenantId,
       newStock: result.newStock,
+      quantity: result.quantity,
       delta: result.quantity,
-      type: 'PURCHASE'
+      type: 'PURCHASE',
+      unitCostCents: result.unitCostCents,
+      referenceId: purchaseId,
+      referenceType: 'PURCHASE'
     });
     eventBus.emit(EVENTS.PRODUCT_UPDATED, {
       id: result.productId,
+      tenantId: result.tenantId,
       action: 'purchase'
     });
 
@@ -133,6 +156,9 @@ export class PurchaseService {
    * @param {string} reason 
    */
   static async cancelPurchase(purchaseId, reason = '') {
+    // 0. Validação de Autorização (Offline-First Guard - Exclusivo para admin)
+    assertPermission('update', 'purchases');
+
     let result = null;
 
     await executeTransaction(['purchases', 'stockMovements', 'products', 'settings'], 'readwrite', async (stores) => {
@@ -155,6 +181,7 @@ export class PurchaseService {
         );
       }
 
+      const currentTenant = purchase.tenantId || product.tenantId || authService.getTenantId() || null;
       const returnMovementId = crypto.randomUUID();
       const nowIso = new Date().toISOString();
 
@@ -168,6 +195,7 @@ export class PurchaseService {
       const returnMovement = {
         id: returnMovementId,
         productId: product.id,
+        tenantId: currentTenant,
         type: 'OUT',
         quantity: purchase.quantity,
         delta: -purchase.quantity,
@@ -192,6 +220,7 @@ export class PurchaseService {
       result = {
         purchaseId,
         productId: product.id,
+        tenantId: currentTenant,
         deductedQuantity: purchase.quantity,
         newStock
       };
@@ -200,17 +229,20 @@ export class PurchaseService {
     eventBus.emit('PURCHASE_CANCELLED', result);
     eventBus.emit(EVENTS.STOCK_CHANGED, {
       productId: result.productId,
+      tenantId: result.tenantId,
       newStock: result.newStock,
       delta: -result.deductedQuantity,
       type: 'OUT'
     });
     eventBus.emit(EVENTS.PRODUCT_UPDATED, {
       id: result.productId,
+      tenantId: result.tenantId,
       action: 'purchase_cancel'
     });
 
     return result;
   }
+
 
   /**
    * Consolidação geral de compras e estatísticas financeiras.
