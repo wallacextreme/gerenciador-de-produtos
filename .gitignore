@@ -4,6 +4,8 @@ node_modules/
 # output & distribution builds
 out/
 dist/
+dist-installers/
+.firebase/
 *.tgz
 
 # code coverage

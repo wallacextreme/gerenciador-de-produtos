@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:staging": "vite build --mode staging",
+    "deploy:hosting": "powershell -ExecutionPolicy Bypass -File scripts/deploy-hosting.ps1",
+    "build:windows": "powershell -ExecutionPolicy Bypass -File scripts/build-windows.ps1",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
