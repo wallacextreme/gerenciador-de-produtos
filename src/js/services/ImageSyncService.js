@@ -1001,6 +1001,8 @@ export class ImageSyncService {
           expectedHash: item.hash,
           url: item.url,
           thumbnailUrl: item.thumbnailUrl,
+          remotePath: item.remotePath || item.url || '',
+          storageProvider: item.storageProvider || '',
           reason: 'restart_recovery'
         });
         enqueued++;

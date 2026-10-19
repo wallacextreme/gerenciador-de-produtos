@@ -1,0 +1,51 @@
+name: Supabase Keep-Alive (Staging Storage)
+
+on:
+  schedule:
+    # Executa automaticamente a cada 3 dias às 09:00 UTC (06:00 BRT)
+    # Mantém o projeto ativo bem abaixo do limite de 7 dias de inatividade do Free Tier
+    - cron: '0 9 */3 * *'
+  workflow_dispatch: # Permite disparo manual imediato pela aba Actions do GitHub
+
+permissions:
+  contents: read
+
+jobs:
+  keep-alive:
+    name: Ping Supabase Storage & PostgREST
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://fujgtzxzspqhvvbzmqzv.supabase.co' }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY || 'sb_publishable_2PiIY1v6HWea8sqwCg2KVQ_aAKflAZh' }}
+    steps:
+      - name: Ping Supabase Storage API (storage.buckets)
+        run: |
+          echo "Disparando Keep-Alive contra Supabase Storage API (${SUPABASE_URL})..."
+          HTTP_STATUS=$(curl -s -o /tmp/storage_resp.json -w "%{http_code}" \
+            -X GET "${SUPABASE_URL}/storage/v1/bucket" \
+            -H "apikey: ${SUPABASE_KEY}" \
+            -H "Accept: application/json")
+          echo "Storage API HTTP Status: ${HTTP_STATUS}"
+          cat /tmp/storage_resp.json
+          echo ""
+          if [ "${HTTP_STATUS}" -lt 200 ] || [ "${HTTP_STATUS}" -ge 300 ]; then
+            echo "::error::Falha no Keep-Alive do Supabase Storage (HTTP ${HTTP_STATUS})"
+            exit 1
+          fi
+
+      - name: Ping Supabase PostgREST API (RPC keep_alive)
+        run: |
+          echo "Acionando PostgREST / PostgreSQL schema cache..."
+          HTTP_STATUS=$(curl -s -o /tmp/rest_resp.json -w "%{http_code}" \
+            -X POST "${SUPABASE_URL}/rest/v1/rpc/keep_alive" \
+            -H "apikey: ${SUPABASE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          echo "PostgREST HTTP Status: ${HTTP_STATUS}"
+          cat /tmp/rest_resp.json
+          echo ""
+          # 200 (função RPC instalada) ou 404 PGRST202 (PostgREST consultou o banco com sucesso)
+          if [ "${HTTP_STATUS}" != "200" ] && [ "${HTTP_STATUS}" != "404" ]; then
+            echo "::warning::Status inesperado no PostgREST: ${HTTP_STATUS}"
+          fi

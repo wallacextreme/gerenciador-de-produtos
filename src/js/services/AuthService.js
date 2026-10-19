@@ -283,10 +283,16 @@ export class AuthService {
       this._unsubscribeProvider = null;
     }
     this._listeners.clear();
+    delete this.getCurrentSession;
+    delete this.getTenantId;
+    delete this.getRole;
+    delete this.isConfigured;
+    delete this.isAuthenticated;
     this.provider = new FirebaseAuthProvider();
     this.currentSession = null;
     this.state = AUTH_STATES.UNAUTHENTICATED;
     this._initialized = false;
+    setTenantResolver(() => this.getTenantId());
   }
 }
 

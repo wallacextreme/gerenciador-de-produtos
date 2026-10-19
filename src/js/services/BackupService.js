@@ -158,6 +158,7 @@ export class BackupService {
           const thumbBase64 = img.thumbnailBlob ? await this.blobToBase64(img.thumbnailBlob) : null;
 
           processedImages.push({
+            ...img,
             id: img.id,
             productId: img.productId,
             blob: mainBase64,

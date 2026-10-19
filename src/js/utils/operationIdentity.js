@@ -290,6 +290,8 @@ export function normalizeBusinessPayload(entityType, payload) {
     for (const field of knownFields) {
       if (payload[field] !== undefined) {
         normalized[field] = normalizeValue(payload[field]);
+      } else if (entityType === 'suppliers' && field === 'contactName' && payload.contactPerson !== undefined) {
+        normalized[field] = normalizeValue(payload.contactPerson);
       }
     }
   } else {

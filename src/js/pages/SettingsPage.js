@@ -10,7 +10,8 @@ import { pwaHandler } from '../utils/pwa.js';
 import { platform } from '../platform/index.js';
 import { syncEngine } from '../services/SyncEngine.js';
 import { syncRepository } from '../repositories/SyncRepository.js';
-import { FirebaseProvider } from '../sync/FirebaseProvider.js';
+import { FirebaseRealtimeProvider } from '../sync/FirebaseRealtimeProvider.js';
+import { authService } from '../services/AuthService.js';
 import { formatSyncEntity, formatSyncAction } from '../utils/translations.js';
 
 export class SettingsPage {
@@ -657,7 +658,7 @@ export class SettingsPage {
             <svg class="w-4 h-4 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             Não é possível restaurar este arquivo
           </div>
-          <p>${validation.error}</p>
+          <p>${this._esc(validation.error)}</p>
         </div>
       `;
       const confirmBtn = this.rootElement.querySelector('#btn-confirm-restore');
@@ -678,11 +679,11 @@ export class SettingsPage {
         <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
           <div class="flex justify-between text-slate-500">
             <span>Data de Exportação:</span>
-            <span class="font-bold text-slate-800">${exportedDate}</span>
+            <span class="font-bold text-slate-800">${this._esc(exportedDate)}</span>
           </div>
           <div class="flex justify-between text-slate-500">
             <span>Versão da Aplicação:</span>
-            <span class="font-bold text-slate-800">${backupObject.appVersion || 'v1.0.0'}</span>
+            <span class="font-bold text-slate-800">${this._esc(backupObject.appVersion || 'v1.0.0')}</span>
           </div>
         </div>
 
@@ -947,7 +948,9 @@ export class SettingsPage {
       btnTest.addEventListener('click', async () => {
         const apiKey = this.rootElement.querySelector('#input-fb-api-key').value.trim();
         const projectId = this.rootElement.querySelector('#input-fb-project-id').value.trim();
-        
+        const authDomain = this.rootElement.querySelector('#input-fb-auth-domain')?.value.trim() || '';
+        const appId = this.rootElement.querySelector('#input-fb-app-id')?.value.trim() || '';
+
         if (!apiKey || !projectId) {
           alert('Preencha ao menos a API Key e o Project ID para testar a conexão.');
           return;
@@ -956,7 +959,13 @@ export class SettingsPage {
         btnTest.disabled = true;
         btnTest.innerHTML = `<svg class="animate-spin h-4 w-4 mr-1 text-blue-700" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg> Testando...`;
 
-        const tempProvider = new FirebaseProvider({ apiKey, projectId });
+        const tempProvider = new FirebaseRealtimeProvider({
+          apiKey,
+          projectId,
+          authDomain,
+          appId,
+          databaseURL: this.firebaseConfig?.databaseURL || `https://${projectId}-default-rtdb.firebaseio.com`
+        }, authService);
         const result = await tempProvider.testConnection();
 
         btnTest.disabled = false;

@@ -159,7 +159,7 @@ export class ReportsPage {
         viewContainer.innerHTML = `
           <div class="bg-rose-50 border border-rose-200 text-rose-800 p-6 rounded-2xl text-xs">
             <h4 class="font-bold mb-1">Falha na geração do relatório</h4>
-            <p>${err.message}</p>
+            <p>${this._esc(err.message)}</p>
           </div>
         `;
       }
@@ -192,9 +192,9 @@ export class ReportsPage {
 
       ${this.periodType === PERIOD_TYPES.CUSTOM && !isStockReport ? `
         <div class="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
-          <input type="date" id="custom-start-date" value="${this.customStartDate || ''}" class="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-700" />
+          <input type="date" id="custom-start-date" value="${this._esc(this.customStartDate || '')}" class="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-700" />
           <span class="text-slate-400 text-xs">até</span>
-          <input type="date" id="custom-end-date" value="${this.customEndDate || ''}" class="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-700" />
+          <input type="date" id="custom-end-date" value="${this._esc(this.customEndDate || '')}" class="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-700" />
           <button id="btn-apply-custom-date" class="bg-slate-900 text-white font-bold px-2 py-1 rounded text-[11px] hover:bg-slate-800">Filtrar</button>
         </div>
       ` : ''}
@@ -205,7 +205,7 @@ export class ReportsPage {
           <label class="text-[11px] font-bold text-slate-500 uppercase">Categoria:</label>
           <select id="select-category" class="bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500">
             <option value="">Todas</option>
-            ${this.categories.map(c => `<option value="${c}" ${this.selectedCategory === c ? 'selected' : ''}>${c}</option>`).join('')}
+            ${this.categories.map(c => `<option value="${this._esc(c)}" ${this.selectedCategory === c ? 'selected' : ''}>${this._esc(c)}</option>`).join('')}
           </select>
         </div>
       ` : ''}
@@ -315,8 +315,8 @@ export class ReportsPage {
       <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div class="p-4 border-b border-slate-100 flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wider">${report.title}</h3>
-            ${report.period ? `<span class="text-[11px] text-slate-500 font-medium">(${report.period.label})</span>` : ''}
+            <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wider">${this._esc(report.title)}</h3>
+            ${report.period ? `<span class="text-[11px] text-slate-500 font-medium">(${this._esc(report.period.label)})</span>` : ''}
           </div>
           <span class="text-[11px] text-slate-400 font-semibold">${rows.length} registros encontrados</span>
         </div>
@@ -325,7 +325,7 @@ export class ReportsPage {
           <table class="w-full text-left border-collapse text-xs">
             <thead class="bg-slate-50 sticky top-0 z-10 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-wider">
               <tr>
-                ${columns.map(c => `<th class="py-3 px-4">${c.label}</th>`).join('')}
+                ${columns.map(c => `<th class="py-3 px-4">${this._esc(c.label)}</th>`).join('')}
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 font-medium text-slate-700">
@@ -339,7 +339,7 @@ export class ReportsPage {
                 <tr class="hover:bg-slate-50/80 transition ${row.isCancelled ? 'opacity-50 line-through' : ''}">
                   ${columns.map(col => {
                     const val = row[col.key];
-                    return `<td class="py-3 px-4 whitespace-nowrap">${val !== undefined && val !== null ? val : '—'}</td>`;
+                    return `<td class="py-3 px-4 whitespace-nowrap">${val !== undefined && val !== null ? this._esc(val) : '—'}</td>`;
                   }).join('')}
                 </tr>
               `).join('')}
@@ -440,5 +440,15 @@ export class ReportsPage {
         }
       });
     }
+  }
+
+  _esc(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }

@@ -13,6 +13,7 @@ import { computeCanonicalPayloadHash, arePayloadsEquivalent } from '../utils/ope
 export class SyncRepository extends BaseRepository {
   constructor() {
     super('syncQueue');
+    this._enqueueSeq = 0;
   }
 
   /**
@@ -120,6 +121,7 @@ export class SyncRepository extends BaseRepository {
 
       const newItem = {
         id: crypto.randomUUID(),
+        _seq: ++this._enqueueSeq,
         operationId: targetOpId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'op_' + Math.random().toString(36).substring(2, 9)),
         entityType,
         entityId,
@@ -170,7 +172,7 @@ export class SyncRepository extends BaseRepository {
 
       // Se já estiver in-flight ou SYNCING, verifica se o lease está ativo
       if (item.inFlight || item.status === 'SYNCING') {
-        const isExpired = item.claimExpiresAt ? (new Date(item.claimExpiresAt).getTime() < now) : true;
+        const isExpired = item.claimExpiresAt ? (new Date(item.claimExpiresAt).getTime() <= now) : true;
         if (!isExpired && item.claimedBy && item.claimedBy !== ownerId && !options.isRecovery) {
           // Outra instância ativa detém o lease válido
           return null;
@@ -519,6 +521,7 @@ export class SyncRepository extends BaseRepository {
    */
   async hasUnsyncedPredecessorOrInFlight(entityType, entityId, tenantId, currentItemId, currentItemCreatedAt) {
     const all = await this.findAll(false);
+    const currentItem = all.find(i => i && i.id === currentItemId) || null;
     return all.some(other => {
       if (!other || other.id === currentItemId) return false;
       if (other.entityType !== entityType || other.entityId !== entityId) return false;
@@ -532,7 +535,15 @@ export class SyncRepository extends BaseRepository {
         const otherTime = new Date(other.createdAt).getTime();
         const currTime = new Date(currentItemCreatedAt).getTime();
         if (otherTime < currTime) return true;
-        if (otherTime === currTime && String(other.id) < String(currentItemId)) return true;
+        if (otherTime === currTime) {
+          if (currentItem && typeof other._seq === 'number' && typeof currentItem._seq === 'number' && other._seq !== currentItem._seq) {
+            return other._seq < currentItem._seq;
+          }
+          if (currentItem?.payload?.version !== undefined && other.payload?.version !== undefined && other.payload.version !== currentItem.payload.version) {
+            return other.payload.version < currentItem.payload.version;
+          }
+          if (String(other.id) < String(currentItemId)) return true;
+        }
       }
       return false;
     });
@@ -578,7 +589,14 @@ export class SyncRepository extends BaseRepository {
         }
         return true;
       })
-      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      .sort((a, b) => {
+        const diff = new Date(a.createdAt) - new Date(b.createdAt);
+        if (diff !== 0) return diff;
+        if (typeof a._seq === 'number' && typeof b._seq === 'number' && a._seq !== b._seq) {
+          return a._seq - b._seq;
+        }
+        return String(a.id).localeCompare(String(b.id));
+      });
   }
 
   /**
@@ -816,6 +834,54 @@ export class SyncRepository extends BaseRepository {
     }
 
     return { retriedCount, skippedCount, skippedItems };
+  }
+
+  /**
+   * Recupera itens que falharam EXCLUSIVAMENTE por erro de configuração de provedor
+   * (versões anteriores enviavam para a API REST do Cloud Firestore, desativada no projeto).
+   * Essas requisições foram rejeitadas antes de qualquer gravação remota, portanto o desfecho
+   * remoto é conhecido (nada foi gravado) e o reenvio é seguro e idempotente.
+   * Respeita isolamento de tenant e a matriz de permissões da sessão ativa.
+   * @param {Object} [options={}]
+   * @returns {Promise<{ recoveredCount: number }>}
+   */
+  async recoverProviderMisconfigurationFailures(options = {}) {
+    const PROVIDER_MISCONFIG_PATTERNS = [
+      'cloud firestore api has not been used',
+      'firestore.googleapis.com',
+      'erro ao salvar documento no firestore',
+      'erro ao deletar documento no firestore',
+      'firebase não configurado com project id e api key'
+    ];
+    const failed = await this.getFailed();
+    const curTenant = getCurrentTenant();
+    const auth = options.authService || authService;
+    const currentSession = auth ? auth.getCurrentSession() : null;
+    const now = new Date().toISOString();
+    let recoveredCount = 0;
+
+    for (const item of failed) {
+      const msg = String(item.lastError || '').toLowerCase();
+      if (!PROVIDER_MISCONFIG_PATTERNS.some((p) => msg.includes(p))) continue;
+      if (!item.tenantId || (curTenant && item.tenantId !== curTenant)) continue;
+      if (!item.entityType || !item.action || !item.entityId) continue;
+      if (currentSession && !checkPermission(currentSession, item.action, item.entityType).authorized) continue;
+
+      item.status = 'PENDING';
+      item.attempts = 0;
+      item.lastError = null;
+      item.errorCategory = null;
+      item.permanentFailure = false;
+      item.requiresResolution = false;
+      item.remoteOutcomeUnknown = false;
+      item.inFlightInterrupted = false;
+      item.dispatchStarted = false;
+      item.recoveredFromProviderMisconfig = true;
+      item.updatedAt = now;
+      await this.update(item, { isTechnicalUpdate: true });
+      recoveredCount++;
+    }
+    return { recoveredCount };
   }
 
   /**

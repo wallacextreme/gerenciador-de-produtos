@@ -213,7 +213,15 @@ export class NFeImportPage {
     }
 
     dropzone.innerHTML = originalContent;
-    this.bindEvents(); // Re-bind dropzone events as innerHTML changed
+    const fileInput = this.rootElement.querySelector('#nfe-file-input');
+    const btnBrowse = this.rootElement.querySelector('#btn-browse-files');
+    btnBrowse?.addEventListener('click', () => fileInput?.click());
+    fileInput?.addEventListener('change', async (e) => {
+      if (e.target.files.length > 0) {
+        await this.handleFiles(Array.from(e.target.files));
+      }
+      fileInput.value = '';
+    });
     await this.loadData();
   }
 
@@ -269,19 +277,19 @@ export class NFeImportPage {
     const itensHtml = nfe.itens.map((item, index) => {
       const isVinculado = item.statusDePara === 'VINCULADO';
       const prodSelectOptions = this.allProducts.map(p => 
-        `<option value="${p.id}" ${item.idProdutoInterno === p.id ? 'selected' : ''}>${this._esc(p.name)} (SKU: ${p.productCode || '-'})</option>`
+        `<option value="${this._esc(p.id)}" ${item.idProdutoInterno === p.id ? 'selected' : ''}>${this._esc(p.name)} (SKU: ${this._esc(p.productCode || '-')})</option>`
       ).join('');
 
       return `
         <div class="p-3 border ${isVinculado ? 'border-emerald-200 bg-emerald-50/30' : 'border-amber-200 bg-amber-50'} rounded-lg text-xs space-y-2 mb-2">
           <div class="flex justify-between items-start">
             <div>
-              <strong class="text-slate-800">${item.codigoFornecedor} - ${this._esc(item.descricao)}</strong>
-              <div class="text-[10px] text-slate-500 font-mono mt-0.5">EAN: ${item.ean || 'N/A'} | NCM: ${item.ncm || 'N/A'} | CFOP: ${item.cfop || 'N/A'}</div>
+              <strong class="text-slate-800">${this._esc(item.codigoFornecedor)} - ${this._esc(item.descricao)}</strong>
+              <div class="text-[10px] text-slate-500 font-mono mt-0.5">EAN: ${this._esc(item.ean || 'N/A')} | NCM: ${this._esc(item.ncm || 'N/A')} | CFOP: ${this._esc(item.cfop || 'N/A')}</div>
             </div>
             <div class="text-right">
-              <span class="font-bold text-slate-800">${item.quantidade} ${item.unidade}</span>
-              <div class="text-slate-600">Total: R$ ${item.valorTotal.toFixed(2)}</div>
+              <span class="font-bold text-slate-800">${Number(item.quantidade) || 0} ${this._esc(item.unidade)}</span>
+              <div class="text-slate-600">Total: R$ ${(Number(item.valorTotal) || 0).toFixed(2)}</div>
             </div>
           </div>
           
@@ -295,7 +303,7 @@ export class NFeImportPage {
             </div>
             <div class="w-24">
               <label class="block text-[10px] font-bold uppercase text-slate-600 mb-1">Multiplicador:</label>
-              <input type="number" step="0.001" value="${item.fatorConversao || 1}" class="de-para-fator w-full p-1.5 border border-slate-300 rounded text-xs text-center" data-index="${index}" title="Ex: XML tem 1 CX, Interno tem 10 UN. Fator = 10">
+              <input type="number" step="0.001" value="${Number(item.fatorConversao) || 1}" class="de-para-fator w-full p-1.5 border border-slate-300 rounded text-xs text-center" data-index="${index}" title="Ex: XML tem 1 CX, Interno tem 10 UN. Fator = 10">
             </div>
             <button class="btn-salvar-vinculo px-3 py-1.5 bg-slate-800 text-white rounded font-semibold transition hover:bg-slate-700" data-index="${index}">
               Salvar Vínculo
@@ -323,8 +331,8 @@ export class NFeImportPage {
           
           <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 rounded-t-2xl shrink-0">
             <div>
-              <h3 class="text-base font-bold text-slate-800">Conferência de NFe - ${nfe.cabecalho.numero} / ${nfe.cabecalho.serie}</h3>
-              <p class="text-xs text-slate-500">${this._esc(nfe.emitente.razaoSocial)} (CNPJ: ${nfe.emitente.cnpj})</p>
+              <h3 class="text-base font-bold text-slate-800">Conferência de NFe - ${this._esc(nfe.cabecalho.numero)} / ${this._esc(nfe.cabecalho.serie)}</h3>
+              <p class="text-xs text-slate-500">${this._esc(nfe.emitente.razaoSocial)} (CNPJ: ${this._esc(nfe.emitente.cnpj)})</p>
             </div>
             <button id="modal-close-btn" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition">
               <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -337,10 +345,10 @@ export class NFeImportPage {
             
             <div class="mb-4 text-sm">
               <div class="grid grid-cols-2 gap-4 border p-3 rounded-lg bg-slate-50 text-xs">
-                <div><span class="text-slate-500">Chave de Acesso:</span> <br><strong class="font-mono text-[10px]">${nfe.cabecalho.chaveAcesso}</strong></div>
+                <div><span class="text-slate-500">Chave de Acesso:</span> <br><strong class="font-mono text-[10px]">${this._esc(nfe.cabecalho.chaveAcesso)}</strong></div>
                 <div><span class="text-slate-500">Data Emissão:</span> <br><strong>${new Date(nfe.cabecalho.dataEmissao).toLocaleString('pt-BR')}</strong></div>
-                <div><span class="text-slate-500">Valor Produtos:</span> <br><strong>R$ ${nfe.totais.valorProdutos.toFixed(2)}</strong></div>
-                <div><span class="text-slate-500">Total NFe:</span> <br><strong class="text-blue-700">R$ ${nfe.totais.valorTotalNota.toFixed(2)}</strong></div>
+                <div><span class="text-slate-500">Valor Produtos:</span> <br><strong>R$ ${(Number(nfe.totais.valorProdutos) || 0).toFixed(2)}</strong></div>
+                <div><span class="text-slate-500">Total NFe:</span> <br><strong class="text-blue-700">R$ ${(Number(nfe.totais.valorTotalNota) || 0).toFixed(2)}</strong></div>
               </div>
             </div>
 

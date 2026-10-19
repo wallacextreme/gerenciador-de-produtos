@@ -1,4 +1,4 @@
-import { BaseRepository } from './BaseRepository.js';
+import { BaseRepository, getCurrentTenant } from './BaseRepository.js';
 import { getDB } from '../db/connection.js';
 
 export class NFeImportRepository extends BaseRepository {
@@ -13,7 +13,9 @@ export class NFeImportRepository extends BaseRepository {
   async findByChaveAcesso(chaveAcesso) {
     if (!chaveAcesso) return null;
     const db = await getDB();
-    return await db.getFromIndex(this.storeName, 'chaveAcesso', chaveAcesso);
+    const curTenant = getCurrentTenant();
+    const all = await db.getAllFromIndex(this.storeName, 'chaveAcesso', chaveAcesso);
+    return all.find(item => !curTenant || item.tenantId === curTenant) || null;
   }
 
   /**

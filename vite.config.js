@@ -18,6 +18,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1200,
     target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome105' : 'esnext'
   }
 });

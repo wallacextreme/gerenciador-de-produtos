@@ -219,6 +219,7 @@ export class PurchaseService {
 
       result = {
         purchaseId,
+        movementId: returnMovementId,
         productId: product.id,
         tenantId: currentTenant,
         deductedQuantity: purchase.quantity,
@@ -228,11 +229,16 @@ export class PurchaseService {
 
     eventBus.emit('PURCHASE_CANCELLED', result);
     eventBus.emit(EVENTS.STOCK_CHANGED, {
+      id: result.movementId,
+      movementId: result.movementId,
       productId: result.productId,
       tenantId: result.tenantId,
       newStock: result.newStock,
+      quantity: result.deductedQuantity,
       delta: -result.deductedQuantity,
-      type: 'OUT'
+      type: 'OUT',
+      referenceId: purchaseId,
+      referenceType: 'PURCHASE_CANCEL'
     });
     eventBus.emit(EVENTS.PRODUCT_UPDATED, {
       id: result.productId,

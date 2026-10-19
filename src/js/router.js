@@ -1,4 +1,17 @@
 import { authService } from './services/AuthService.js';
+import { DashboardPage } from './pages/DashboardPage.js';
+import { ProductsPage } from './pages/ProductsPage.js';
+import { ProductFormPage } from './pages/ProductFormPage.js';
+import { ProductDetailPage } from './pages/ProductDetailPage.js';
+import { StockPage } from './pages/StockPage.js';
+import { SalesPage } from './pages/SalesPage.js';
+import { PurchasesPage } from './pages/PurchasesPage.js';
+import { NFeImportPage } from './pages/NFeImportPage.js';
+import { SuppliersPage } from './pages/SuppliersPage.js';
+import { QuotationsPage } from './pages/QuotationsPage.js';
+import { SettingsPage } from './pages/SettingsPage.js';
+import { ReportsPage } from './pages/ReportsPage.js';
+import { LoginPage } from './pages/LoginPage.js';
 
 export class Router {
   constructor() {
@@ -99,7 +112,6 @@ export class Router {
 
   async renderProducts() {
     this.rootElement.innerHTML = '';
-    const { ProductsPage } = await import('./pages/ProductsPage.js');
     this.currentPage = new ProductsPage(this.rootElement);
     this.currentPage.render();
     
@@ -112,7 +124,6 @@ export class Router {
 
   async renderProductForm(id = null) {
     this.rootElement.innerHTML = '';
-    const { ProductFormPage } = await import('./pages/ProductFormPage.js');
     this.currentPage = new ProductFormPage(this.rootElement, id);
     this.currentPage.render();
     
@@ -125,7 +136,6 @@ export class Router {
 
   async renderProductDetail(id) {
     this.rootElement.innerHTML = '';
-    const { ProductDetailPage } = await import('./pages/ProductDetailPage.js');
     this.currentPage = new ProductDetailPage(this.rootElement, id);
     this.currentPage.render();
 
@@ -138,7 +148,6 @@ export class Router {
 
   async renderStock() {
     this.rootElement.innerHTML = '';
-    const { StockPage } = await import('./pages/StockPage.js');
     this.currentPage = new StockPage(this.rootElement);
     this.currentPage.render();
 
@@ -151,7 +160,6 @@ export class Router {
 
   async renderSales() {
     this.rootElement.innerHTML = '';
-    const { SalesPage } = await import('./pages/SalesPage.js');
     this.currentPage = new SalesPage(this.rootElement);
     this.currentPage.render();
 
@@ -164,7 +172,6 @@ export class Router {
 
   async renderPurchases() {
     this.rootElement.innerHTML = '';
-    const { PurchasesPage } = await import('./pages/PurchasesPage.js');
     this.currentPage = new PurchasesPage(this.rootElement);
     this.currentPage.render();
 
@@ -177,7 +184,6 @@ export class Router {
 
   async renderNFeImport() {
     this.rootElement.innerHTML = '';
-    const { NFeImportPage } = await import('./pages/NFeImportPage.js');
     this.currentPage = new NFeImportPage(this.rootElement);
     this.currentPage.render();
 
@@ -190,7 +196,6 @@ export class Router {
 
   async renderSuppliers() {
     this.rootElement.innerHTML = '';
-    const { SuppliersPage } = await import('./pages/SuppliersPage.js');
     this.currentPage = new SuppliersPage(this.rootElement);
     this.currentPage.render();
 
@@ -203,7 +208,6 @@ export class Router {
 
   async renderQuotations() {
     this.rootElement.innerHTML = '';
-    const { QuotationsPage } = await import('./pages/QuotationsPage.js');
     this.currentPage = new QuotationsPage(this.rootElement);
     this.currentPage.render();
 
@@ -216,7 +220,6 @@ export class Router {
 
   async renderSettings() {
     this.rootElement.innerHTML = '';
-    const { SettingsPage } = await import('./pages/SettingsPage.js');
     this.currentPage = new SettingsPage(this.rootElement);
     this.currentPage.render();
 
@@ -229,7 +232,6 @@ export class Router {
 
   async renderReports() {
     this.rootElement.innerHTML = '';
-    const { ReportsPage } = await import('./pages/ReportsPage.js');
     this.currentPage = new ReportsPage(this.rootElement);
     this.currentPage.render();
 
@@ -242,7 +244,6 @@ export class Router {
 
   async renderLogin() {
     this.rootElement.innerHTML = '';
-    const { LoginPage } = await import('./pages/LoginPage.js');
     this.currentPage = new LoginPage(this.rootElement);
     if (this.redirectAfterLogin) {
       this.currentPage.setRedirectUrl(this.redirectAfterLogin);
@@ -306,7 +307,6 @@ export class Router {
 
   async renderDashboard() {
     this.rootElement.innerHTML = '';
-    const { DashboardPage } = await import('./pages/DashboardPage.js');
     this.currentPage = new DashboardPage(this.rootElement);
     this.currentPage.render();
 

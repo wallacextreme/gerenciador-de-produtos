@@ -2,6 +2,9 @@ import { executeTransaction } from '../db/transactions.js';
 import { eventBus, EVENTS } from '../eventBus.js';
 import { deParaRepository } from '../repositories/DeParaRepository.js';
 import { nfeImportRepository } from '../repositories/NFeImportRepository.js';
+import { assertPermission } from '../utils/authGuard.js';
+import { getCurrentTenant } from '../repositories/BaseRepository.js';
+import { authService } from './AuthService.js';
 
 export class NFeTransactionService {
   /**
@@ -11,6 +14,7 @@ export class NFeTransactionService {
    * @param {string} idStaging 
    */
   static async processFinalEntry(idStaging) {
+    assertPermission('create', 'purchases');
     const record = await nfeImportRepository.findById(idStaging);
     if (!record) throw new Error('NFe não encontrada na Staging Area.');
     
@@ -21,6 +25,7 @@ export class NFeTransactionService {
     const nfe = record.dadosNormalizados;
     const itemsProcessed = [];
     const productIdToStockDelta = new Map(); // Para disparar eventos depois
+    const resolvedTenant = record.tenantId || getCurrentTenant() || authService.getTenantId() || null;
 
     await executeTransaction(['purchases', 'stockMovements', 'products', 'nfe_imports', 'de_para_produtos'], 'readwrite', async (stores) => {
       const nowIso = new Date().toISOString();
@@ -43,6 +48,7 @@ export class NFeTransactionService {
           throw new Error(`Produto interno vinculado (ID: ${item.idProdutoInterno}) não encontrado ou inativo.`);
         }
 
+        const itemTenant = product.tenantId || resolvedTenant;
         const quantityXML = item.quantidade;
         const fator = item.fatorConversao || 1;
         const quantidadeConvertida = quantityXML * fator;
@@ -61,6 +67,7 @@ export class NFeTransactionService {
         // Salvar Purchase (cada item como uma linha de compra para adequar à arquitetura existente)
         const purchaseRecord = {
           id: purchaseId,
+          ...(itemTenant ? { tenantId: itemTenant } : {}),
           supplierId: supplierId,
           supplierName: supplierName,
           productId: product.id,
@@ -85,6 +92,7 @@ export class NFeTransactionService {
         // Salvar StockMovement
         const movementRecord = {
           id: movementId,
+          ...(itemTenant ? { tenantId: itemTenant } : {}),
           productId: product.id,
           type: 'PURCHASE',
           quantity: quantidadeConvertida,

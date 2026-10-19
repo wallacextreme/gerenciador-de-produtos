@@ -225,6 +225,7 @@ export class SaleService {
 
       result = {
         saleId,
+        movementId: returnMovementId,
         productId: product.id,
         tenantId: currentTenant,
         restoredQuantity: sale.quantity,
@@ -233,11 +234,16 @@ export class SaleService {
     });
 
     eventBus.emit(EVENTS.STOCK_CHANGED, {
+      id: result.movementId,
+      movementId: result.movementId,
       productId: result.productId,
       tenantId: result.tenantId,
       newStock: result.newStock,
+      quantity: result.restoredQuantity,
       delta: result.restoredQuantity,
-      type: 'RETURN'
+      type: 'RETURN',
+      referenceId: saleId,
+      referenceType: 'SALE_CANCEL'
     });
     eventBus.emit(EVENTS.PRODUCT_UPDATED, {
       id: result.productId,

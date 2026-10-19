@@ -189,4 +189,40 @@ describe('FASE 15.5 — Auditoria de Hardening do SupabaseStorageProvider', () =
       expect(resolved.getProviderName()).toBe('Supabase Storage');
     });
   });
+
+  describe('5. Keep-Alive Automático Anti-Pausa (pingKeepAlive)', () => {
+    it('5.1 pingKeepAlive({ force: true }) envia GET autenticado para /storage/v1/bucket e respeita throttle de 12h', async () => {
+      const calls = [];
+      const mockFetch = async (url, opts) => {
+        calls.push({ url, opts });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => []
+        };
+      };
+
+      const provider = new SupabaseStorageProvider({
+        supabaseUrl: 'https://fujgtzxzspqhvvbzmqzv.supabase.co',
+        supabaseAnonKey: 'sb_publishable_test_key',
+        fetchImpl: mockFetch
+      });
+
+      const first = await provider.pingKeepAlive({ force: true });
+      expect(first.ok).toBe(true);
+      expect(first.status).toBe(200);
+      expect(calls.length).toBe(1);
+      expect(calls[0].url).toBe('https://fujgtzxzspqhvvbzmqzv.supabase.co/storage/v1/bucket');
+      expect(calls[0].opts.method).toBe('GET');
+      expect(calls[0].opts.headers.apikey).toBe('sb_publishable_test_key');
+
+      // Se localStorage estiver disponível no ambiente, verifica throttle; caso contrário force:true sempre executa
+      if (typeof localStorage !== 'undefined') {
+        const second = await provider.pingKeepAlive({ force: false });
+        expect(second.ok).toBe(true);
+        expect(second.throttled).toBe(true);
+        expect(calls.length).toBe(1);
+      }
+    });
+  });
 });

@@ -481,15 +481,6 @@ export class FirebaseRealtimeProvider extends CloudProvider {
   }
 
   // Operações CRUD Diretas
-  async get(entityType, id) {
-    if (!this.db) await this.initialize();
-    const tenantId = this.getTenantId();
-    const remoteCollection = this._getRemoteCollection(entityType);
-    const itemRef = ref(this.db, `tenants/${tenantId}/${remoteCollection}/${id}`);
-    const snap = await get(itemRef);
-    return snap.exists() ? snap.val() : null;
-  }
-
   async list(entityType, options = {}) {
     const res = await this.pullChanges(entityType);
     let items = res.items;

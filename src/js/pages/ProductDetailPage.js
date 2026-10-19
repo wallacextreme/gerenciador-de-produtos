@@ -459,27 +459,6 @@ export class ProductDetailPage {
   }
 
   _bindDetailInteractions() {
-    const thumbBtns = this.rootElement.querySelectorAll('.thumb-btn');
-    thumbBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const idx = parseInt(btn.dataset.index, 10);
-        this.selectedImageIndex = idx;
-        const mainImg = this.rootElement.querySelector('#main-preview-img');
-        if (mainImg && this.imageUrls[idx]) {
-          mainImg.src = this.imageUrls[idx].url;
-        }
-        thumbBtns.forEach((b, i) => {
-          if (i === idx) {
-            b.classList.add('border-blue-600', 'ring-2', 'ring-blue-100');
-            b.classList.remove('border-slate-200');
-          } else {
-            b.classList.remove('border-blue-600', 'ring-2', 'ring-blue-100');
-            b.classList.add('border-slate-200');
-          }
-        });
-      });
-    });
-
     const delBtn = this.rootElement.querySelector('#btn-delete-detail');
     if (delBtn) {
       delBtn.addEventListener('click', async () => {

@@ -1,4 +1,4 @@
-import { BaseRepository } from './BaseRepository.js';
+import { BaseRepository, getCurrentTenant } from './BaseRepository.js';
 import { getDB } from '../db/connection.js';
 
 export class DeParaRepository extends BaseRepository {
@@ -15,8 +15,9 @@ export class DeParaRepository extends BaseRepository {
   async findByFornecedorEProduto(cnpjFornecedor, codigoFornecedor) {
     if (!cnpjFornecedor || !codigoFornecedor) return null;
     const db = await getDB();
-    // Usa o compound index criado na migration
-    return await db.getFromIndex(this.storeName, 'fornecedor_produto', [cnpjFornecedor, codigoFornecedor]);
+    const curTenant = getCurrentTenant();
+    const all = await db.getAllFromIndex(this.storeName, 'fornecedor_produto', [cnpjFornecedor, codigoFornecedor]);
+    return all.find(item => !curTenant || item.tenantId === curTenant) || null;
   }
 
   /**
@@ -29,10 +30,12 @@ export class DeParaRepository extends BaseRepository {
       throw new Error('CNPJ Fornecedor, Código Fornecedor e ID Interno são obrigatórios.');
     }
 
+    const curTenant = getCurrentTenant();
     const vinculoExistente = await this.findByFornecedorEProduto(data.cnpjFornecedor, data.codigoFornecedor);
     
     const record = vinculoExistente || {
       id: crypto.randomUUID(),
+      ...(curTenant ? { tenantId: curTenant } : {}),
       cnpjFornecedor: data.cnpjFornecedor,
       codigoFornecedor: data.codigoFornecedor,
       createdAt: new Date().toISOString()

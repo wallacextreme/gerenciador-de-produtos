@@ -49,19 +49,21 @@ async function ensureAuthEmulator() {
 
   const cmd = process.platform === 'win32' ? 'cmd.exe' : 'npx';
   const args = process.platform === 'win32'
-    ? ['/c', `npx firebase emulators:start --only auth --project ${TEST_PROJECT_ID}`]
+    ? ['/c', `firebase emulators:start --only auth --project ${TEST_PROJECT_ID}`]
     : ['firebase', 'emulators:start', '--only', 'auth', '--project', TEST_PROJECT_ID];
 
-  spawnedEmulator = spawn(cmd, args, { stdio: 'pipe' });
+  spawnedEmulator = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  if (spawnedEmulator.stdout) spawnedEmulator.stdout.on('data', () => {});
+  if (spawnedEmulator.stderr) spawnedEmulator.stderr.on('data', () => {});
 
   const start = Date.now();
-  while (Date.now() - start < 25000) {
+  while (Date.now() - start < 45000) {
     if (await isAuthEmulatorRunning()) {
       return true; // Inicializado por esta suíte
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error('Falha ao inicializar o Firebase Auth Emulator dentro da janela de 25 segundos.');
+  throw new Error('Falha ao inicializar o Firebase Auth Emulator dentro da janela de 45 segundos.');
 }
 
 async function teardownAuthEmulator() {
@@ -110,7 +112,7 @@ describe('FASE 15.3 — Homologação Integrada do Provisionamento no Firebase A
 
   beforeAll(async () => {
     await ensureAuthEmulator();
-  }, 30000);
+  }, 50000);
 
   afterAll(async () => {
     await teardownAuthEmulator();

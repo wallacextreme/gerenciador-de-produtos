@@ -1,13 +1,13 @@
 # ==============================================================================
-# GestãoPro — Script de Geração de Instaladores Windows (.exe e .msi)
+# GestaoPro - Script de Geracao de Instaladores Windows (.exe e .msi)
 # ==============================================================================
 $ErrorActionPreference = "Stop"
 
 Write-Host "==================================================" -ForegroundColor Cyan
-Write-Host "   GestãoPro — Gerando Instaladores Windows" -ForegroundColor Cyan
+Write-Host "   GestaoPro - Gerando Instaladores Windows" -ForegroundColor Cyan
 Write-Host "==================================================" -ForegroundColor Cyan
 
-# Cria pasta de saída de fácil acesso na raiz do projeto
+# Cria pasta de saida de facil acesso na raiz do projeto
 $OutputDir = Join-Path $PSScriptRoot "..\dist-installers"
 if (-not (Test-Path $OutputDir)) {
     New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
@@ -17,7 +17,7 @@ if (-not (Test-Path $OutputDir)) {
 Write-Host "`n[1/2] Compilando instalador executavel (.exe via NSIS)..." -ForegroundColor Yellow
 bun x tauri build -b nsis
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "`n❌ Falha ao compilar instalador .exe." -ForegroundColor Red
+    Write-Host "`n[ERRO] Falha ao compilar instalador .exe." -ForegroundColor Red
     exit 1
 }
 
@@ -25,7 +25,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "`n[2/2] Compilando instalador corporativo (.msi via WiX)..." -ForegroundColor Yellow
 bun x tauri build -b msi
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "`n❌ Falha ao compilar instalador .msi." -ForegroundColor Red
+    Write-Host "`n[ERRO] Falha ao compilar instalador .msi." -ForegroundColor Red
     exit 1
 }
 
@@ -36,6 +36,6 @@ $MsiDir  = Join-Path $PSScriptRoot "..\src-tauri\target\release\bundle\msi"
 Get-ChildItem -Path $NsisDir -Filter "*.exe" | Copy-Item -Destination $OutputDir -Force
 Get-ChildItem -Path $MsiDir -Filter "*.msi" | Copy-Item -Destination $OutputDir -Force
 
-Write-Host "`n🎉 Instaladores gerados com sucesso!" -ForegroundColor Green
+Write-Host "`n[OK] Instaladores gerados com sucesso!" -ForegroundColor Green
 Write-Host "Arquivos disponiveis na pasta: $OutputDir" -ForegroundColor Cyan
 Get-ChildItem -Path $OutputDir | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize

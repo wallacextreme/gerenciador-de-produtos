@@ -100,6 +100,8 @@ describe('FASE 14.25 — Validação Final de Contratos e Compatibilidade Offlin
   });
 
   afterAll(async () => {
+    authService.destroy();
+    setTenantResolver(() => authService.getTenantId());
     if (testEnv) await testEnv.cleanup();
     if (spawnedProcess && spawnedProcess.pid) {
       try { process.kill(spawnedProcess.pid); } catch (_) {}

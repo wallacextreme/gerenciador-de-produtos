@@ -114,6 +114,8 @@ describe('FASE 14.24 — Auditoria Adversarial da Outbox, Recuperação do Ledge
   });
 
   afterAll(async () => {
+    authService.destroy();
+    setTenantResolver(() => authService.getTenantId());
     if (testEnv) await testEnv.cleanup();
   });
 

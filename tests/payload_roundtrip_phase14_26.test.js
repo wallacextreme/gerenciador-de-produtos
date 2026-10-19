@@ -162,6 +162,9 @@ describe('FASE 14.26 — Auditoria de Integridade do Payload, Serialização RTD
   });
 
   afterAll(async () => {
+    SyncEngine.destroyAll();
+    authService.destroy();
+    setTenantResolver(() => authService.getTenantId());
     if (testEnv) await testEnv.cleanup();
     if (spawnedProcess && spawnedProcess.pid) {
       try { process.kill(spawnedProcess.pid); } catch (_) {}
@@ -169,6 +172,7 @@ describe('FASE 14.26 — Auditoria de Integridade do Payload, Serialização RTD
   });
 
   beforeEach(async () => {
+    SyncEngine.destroyAll();
     await testEnv.clearDatabase();
     const db = await getDB();
     for (const store of ['products', 'stockMovements', 'settings', 'syncQueue', 'imageManifest']) {

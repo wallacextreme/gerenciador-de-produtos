@@ -47,10 +47,11 @@ export class ReportService {
    * @returns {Blob}
    */
   static _createExcelCompatibleCSVBlob(str) {
-    const len = str.length;
+    const cleanStr = str.startsWith('\uFEFF') ? str.slice(1) : str;
+    const len = cleanStr.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
-      const code = str.charCodeAt(i);
+      const code = cleanStr.charCodeAt(i);
       if (code <= 255) {
         bytes[i] = code;
       } else {
@@ -123,7 +124,10 @@ export class ReportService {
    */
   static _escapeCSVField(field) {
     if (field === null || field === undefined) return '';
-    const str = String(field);
+    let str = String(field);
+    if (/^[=+\-@\t\r]/.test(str) && !/^[+-]?\d+([.,]\d+)?%?$/.test(str)) {
+      str = "'" + str;
+    }
     if (str.includes(';') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
       return `"${str.replace(/"/g, '""')}"`;
     }

@@ -3,6 +3,7 @@ import { supplierRepository } from '../repositories/SupplierRepository.js';
 import { productRepository } from '../repositories/ProductRepository.js';
 import { QuotationValidator } from '../validators/QuotationValidator.js';
 import { eventBus } from '../eventBus.js';
+import { assertPermission } from '../utils/authGuard.js';
 
 const MAX_ACTIVE_SUPPLIERS_PER_PRODUCT = 3;
 
@@ -27,6 +28,7 @@ export class QuotationService {
    * @returns {Promise<Object>} Cotação criada
    */
   static async addQuotation(data) {
+    assertPermission('create', 'productSuppliers');
     QuotationValidator.assertValid(data);
 
     // Verificar existência do produto
@@ -104,6 +106,7 @@ export class QuotationService {
    * @returns {Promise<Object>} Nova cotação criada
    */
   static async updateQuotation(oldId, data) {
+    assertPermission('update', 'productSuppliers');
     const old = await productSupplierRepository.findById(oldId);
     if (!old) throw new Error('Cotação não encontrada.');
 
@@ -171,6 +174,7 @@ export class QuotationService {
    * @returns {Promise<Object>}
    */
   static async deactivateQuotation(id) {
+    assertPermission('delete', 'productSuppliers');
     const result = await productSupplierRepository.deactivate(id);
     eventBus.emit('QUOTATION_DELETED', { id, productId: result.productId, supplierId: result.supplierId });
     return result;
@@ -189,6 +193,7 @@ export class QuotationService {
    * @returns {Promise<void>}
    */
   static async setPreferredSupplier(productId, quotationId) {
+    assertPermission('update', 'productSuppliers');
     const allForProduct = await productSupplierRepository.findByProductId(productId);
 
     for (const q of allForProduct) {

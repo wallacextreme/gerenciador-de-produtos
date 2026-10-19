@@ -4,6 +4,8 @@ import { purchaseRepository } from '../repositories/PurchaseRepository.js';
 import { supplierRepository } from '../repositories/SupplierRepository.js';
 import { NFeValidationService } from './NFeValidationService.js';
 import { getDB } from '../db/connection.js';
+import { assertPermission } from '../utils/authGuard.js';
+import { getCurrentTenant } from '../repositories/BaseRepository.js';
 
 export class NFeProcessorService {
   /**
@@ -12,6 +14,7 @@ export class NFeProcessorService {
    * @param {Object} nfe NFe normalizada
    */
   static async processNewImport(nfe) {
+    assertPermission('create', 'purchases');
     // 1. Validação inicial e status
     const validationResult = await NFeValidationService.validate(nfe);
     nfe.status = validationResult.status;
@@ -43,8 +46,10 @@ export class NFeProcessorService {
     }
 
     // 5. Salvar na Staging Area
+    const curTenant = getCurrentTenant();
     const record = {
       id: crypto.randomUUID(),
+      ...(curTenant ? { tenantId: curTenant } : {}),
       chaveAcesso: nfe.cabecalho.chaveAcesso,
       numero: nfe.cabecalho.numero,
       serie: nfe.cabecalho.serie,
@@ -79,6 +84,7 @@ export class NFeProcessorService {
    * @param {string} idStaging 
    */
   static async reavaliarDePara(idStaging) {
+    assertPermission('update', 'purchases');
     const record = await nfeImportRepository.findById(idStaging);
     if (!record) throw new Error('NFe não encontrada na Staging.');
 
@@ -98,7 +104,9 @@ export class NFeProcessorService {
 
     // A. Verifica no banco definitivo (purchases index)
     const db = await getDB();
-    const compras = await db.getAllFromIndex('purchases', 'invoiceKey', chaveAcesso);
+    const curTenant = getCurrentTenant();
+    const allCompras = await db.getAllFromIndex('purchases', 'invoiceKey', chaveAcesso);
+    const compras = curTenant ? allCompras.filter(c => c.tenantId === curTenant) : allCompras;
     if (compras && compras.length > 0) {
       return `Nota fiscal já importada no sistema (Encontrada em ${compras.length} item(s) de compra).`;
     }

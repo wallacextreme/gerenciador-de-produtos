@@ -115,6 +115,9 @@ describe('FASE 14.19 — Auditoria Independente, Concorrência entre Abas, Seria
   });
 
   afterAll(async () => {
+    SyncEngine.destroyAll();
+    authService.destroy();
+    setTenantResolver(() => authService.getTenantId());
     if (testEnv) {
       await testEnv.cleanup();
     }
@@ -137,6 +140,7 @@ describe('FASE 14.19 — Auditoria Independente, Concorrência entre Abas, Seria
   });
 
   afterEach(async () => {
+    SyncEngine.destroyAll();
     setTenantResolver(() => authService.getTenantId());
     authService.setProvider(null);
   });

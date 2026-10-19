@@ -88,7 +88,7 @@ export class SupabaseStorageProvider extends ImageStorageProvider {
     this._resolveEnvConfig();
     if (!this.config) return false;
     const url = this.config.supabaseUrl || this.config.url;
-    const key = this.config.supabaseKey || this.config.publishableKey || this.config.anonKey || this.config.apiKey;
+    const key = this.config.supabaseKey || this.config.publishableKey || this.config.anonKey || this.config.supabaseAnonKey || this.config.apiKey;
     return !!(url && key);
   }
 
@@ -440,5 +440,56 @@ export class SupabaseStorageProvider extends ImageStorageProvider {
   async exists(photoId, remotePath = '') {
     const meta = await this.getMetadata(photoId, remotePath);
     return !!meta;
+  }
+
+  /**
+   * Executa um heartbeat leve contra a API do Supabase Storage para evitar
+   * pausa por inatividade (> 7 dias) no Free Tier.
+   * Possui throttle padrão de 12 horas para não gerar tráfego redundante.
+   *
+   * @param {Object} [options]
+   * @param {boolean} [options.force=false] Ignora o throttle de 12h
+   * @returns {Promise<{ ok: boolean, skipped?: boolean, status?: number }>}
+   */
+  async pingKeepAlive(options = {}) {
+    const supabaseUrl = (this.config.supabaseUrl || this.config.url || '').replace(/\/$/, '');
+    const supabaseKey = this.config.supabaseKey || this.config.publishableKey || this.config.anonKey || this.config.supabaseAnonKey || this.config.apiKey;
+    if (!supabaseUrl || !supabaseKey) {
+      return { ok: false, skipped: true };
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return { ok: false, skipped: true };
+    }
+
+    const THROTTLE_MS = 12 * 60 * 60 * 1000; // 12 horas
+    const STORAGE_KEY = 'gestaopro_supabase_keepalive_ts';
+
+    if (!options.force && typeof localStorage !== 'undefined') {
+      try {
+        const lastTs = Number(localStorage.getItem(STORAGE_KEY) || 0);
+        if (lastTs > 0 && (Date.now() - lastTs) < THROTTLE_MS) {
+          return { ok: true, skipped: true, throttled: true };
+        }
+      } catch (_) {}
+    }
+
+    try {
+      const fetchFn = (this.config && typeof this.config.fetchImpl === 'function')
+        ? this.config.fetchImpl
+        : fetch;
+      const res = await fetchFn(`${supabaseUrl}/storage/v1/bucket`, {
+        method: 'GET',
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`
+        }
+      });
+      if (res.ok && typeof localStorage !== 'undefined') {
+        try { localStorage.setItem(STORAGE_KEY, String(Date.now())); } catch (_) {}
+      }
+      return { ok: res.ok, status: res.status };
+    } catch (_) {
+      return { ok: false };
+    }
   }
 }

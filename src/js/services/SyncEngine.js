@@ -2,7 +2,7 @@ import { syncRepository } from '../repositories/SyncRepository.js';
 import { settingsRepository } from '../repositories/SettingsRepository.js';
 import { productRepository } from '../repositories/ProductRepository.js';
 import { eventBus, EVENTS } from '../eventBus.js';
-import { FirebaseProvider } from '../sync/FirebaseProvider.js';
+import { FirebaseRealtimeProvider } from '../sync/FirebaseRealtimeProvider.js';
 import { MockCloudProvider } from '../sync/MockCloudProvider.js';
 import { authService } from './AuthService.js';
 import { checkPermission, assertPermission } from '../utils/authGuard.js';
@@ -25,8 +25,8 @@ export class SyncEngine {
                          import.meta.env && 
                          (import.meta.env.VITE_PUBLIC_DEMO === 'true' || import.meta.env.VITE_PUBLIC_DEMO === true);
 
-    this.provider = cloudProvider || (isPublicDemo ? new MockCloudProvider({ name: 'Demonstração em Nuvem (Simulada)' }) : new FirebaseProvider());
     this.authService = authServiceInstance || authService;
+    this.provider = cloudProvider || (isPublicDemo ? new MockCloudProvider({ name: 'Demonstração em Nuvem (Simulada)' }) : new FirebaseRealtimeProvider(null, this.authService));
     this.id = (typeof crypto !== 'undefined' && crypto.randomUUID)
       ? crypto.randomUUID()
       : 'engine_' + Math.random().toString(36).substring(2, 9);
@@ -35,9 +35,22 @@ export class SyncEngine {
     this.lastSyncTimestamp = null;
     this.debounceTimer = null;
     this._initialized = false;
+    this._destroyed = false;
     this._cleanupFns = [];
     /** Relógio injetável (ms) usado pelo backoff de reconciliação; substituível em testes. */
     this._now = () => Date.now();
+    SyncEngine._activeInstances.add(this);
+  }
+
+  static _activeInstances = new Set();
+
+  static destroyAll() {
+    for (const inst of Array.from(SyncEngine._activeInstances)) {
+      try {
+        inst.destroy();
+      } catch (_) {}
+    }
+    SyncEngine._activeInstances.clear();
   }
 
   /**
@@ -46,11 +59,13 @@ export class SyncEngine {
   async init() {
     if (this._initialized) return;
     this._initialized = true;
+    this._destroyed = false;
+    SyncEngine._activeInstances.add(this);
 
     try {
       // 1. Carrega configurações salvas de nuvem ou fallback de ambiente
       let savedConfig = await settingsRepository.get('firebaseConfig');
-      if ((!savedConfig || !savedConfig.apiKey) && typeof import.meta !== 'undefined' && import.meta.env) {
+      if ((!savedConfig || !savedConfig.apiKey) && !(this.provider && this.provider._initialized) && typeof import.meta !== 'undefined' && import.meta.env) {
         const env = import.meta.env;
         if (env.VITE_FIREBASE_API_KEY && env.VITE_FIREBASE_PROJECT_ID) {
           savedConfig = {
@@ -69,9 +84,9 @@ export class SyncEngine {
       }
 
       if (savedConfig) {
-        if (this.provider instanceof FirebaseProvider) {
+        if (typeof this.provider?.updateConfig === 'function') {
           this.provider.updateConfig(savedConfig);
-        } else if (this.provider && typeof this.provider.initialize === 'function') {
+        } else if (this.provider && !this.provider._initialized && typeof this.provider.initialize === 'function') {
           await this.provider.initialize(savedConfig);
         }
       }
@@ -124,7 +139,7 @@ export class SyncEngine {
    * @param {Object} config 
    */
   async updateCredentials(config) {
-    if (this.provider instanceof FirebaseProvider) {
+    if (typeof this.provider?.updateConfig === 'function') {
       this.provider.updateConfig(config);
     }
     await settingsRepository.set('firebaseConfig', config);
@@ -145,6 +160,8 @@ export class SyncEngine {
    * Encerra o SyncEngine, desregistrando todos os listeners do EventBus e cancelando timers pendentes.
    */
   destroy() {
+    this._destroyed = true;
+    SyncEngine._activeInstances.delete(this);
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
       this.debounceTimer = null;
@@ -172,6 +189,7 @@ export class SyncEngine {
 
     // Produtos (Create/Update)
     const unsubProdUp = eventBus.on(EVENTS.PRODUCT_UPDATED, async (payload) => {
+      if (this._destroyed) return;
       if (payload && payload.id && !isRemote(payload)) {
         if (payload.action === 'stock_change' || payload.action === 'sale' || payload.action === 'purchase') return;
         const action = payload.action === 'create' ? 'CREATE' : 'UPDATE';
@@ -182,6 +200,7 @@ export class SyncEngine {
 
     // Produtos (Soft Delete)
     const unsubProdDel = eventBus.on(EVENTS.PRODUCT_DELETED, async (payload) => {
+      if (this._destroyed) return;
       if (payload && payload.id && !isRemote(payload)) {
         await this.enqueue('products', payload.id, 'DELETE', payload);
       }
@@ -190,6 +209,7 @@ export class SyncEngine {
 
     // Fornecedores (Create)
     const unsubSupCr = eventBus.on('SUPPLIER_CREATED', async (payload) => {
+      if (this._destroyed) return;
       if (payload && payload.id && !isRemote(payload)) {
         await this.enqueue('suppliers', payload.id, 'CREATE', payload);
       }
@@ -198,6 +218,7 @@ export class SyncEngine {
 
     // Fornecedores (Update)
     const unsubSupUp = eventBus.on('SUPPLIER_UPDATED', async (payload) => {
+      if (this._destroyed) return;
       if (payload && payload.id && !isRemote(payload)) {
         await this.enqueue('suppliers', payload.id, 'UPDATE', payload);
       }
@@ -206,6 +227,7 @@ export class SyncEngine {
 
     // Movimentações de Estoque (Ledger /inventory)
     const unsubStock = eventBus.on(EVENTS.STOCK_CHANGED, async (payload) => {
+      if (this._destroyed) return;
       const id = payload?.id || payload?.movementId;
       if (id && !isRemote(payload)) {
         const cleanPayload = {
@@ -231,6 +253,7 @@ export class SyncEngine {
 
     // Vendas
     const unsubSale = eventBus.on(EVENTS.SALE_CREATED, async (payload) => {
+      if (this._destroyed) return;
       const id = payload?.id || payload?.saleId;
       if (id && !isRemote(payload)) {
         await this.enqueue('sales', id, 'CREATE', { ...payload, id });
@@ -240,6 +263,7 @@ export class SyncEngine {
 
     // Compras
     const unsubPurchase = eventBus.on(EVENTS.PURCHASE_CREATED, async (payload) => {
+      if (this._destroyed) return;
       const id = payload?.id || payload?.purchaseId;
       if (id && !isRemote(payload)) {
         await this.enqueue('purchases', id, 'CREATE', { ...payload, id });
@@ -249,6 +273,7 @@ export class SyncEngine {
 
     // Configurações
     const unsubSettings = eventBus.on(EVENTS.SETTINGS_CHANGED, async (payload) => {
+      if (this._destroyed) return;
       if (payload && payload.key && payload.key !== 'firebaseConfig' && !isRemote(payload)) {
         await this.enqueue('settings', payload.key, 'UPDATE', payload);
       }
@@ -261,6 +286,7 @@ export class SyncEngine {
    */
   _setupNetworkListener() {
     const unsubNet = eventBus.on(EVENTS.NETWORK_STATUS_CHANGED, (payload) => {
+      if (this._destroyed) return;
       if (payload && payload.isOnline && this.autoSync) {
         this.triggerAutoSync();
       }
@@ -281,11 +307,12 @@ export class SyncEngine {
 
     const tenantId = payload?.tenantId || (this.authService ? this.authService.getTenantId() : null);
     const item = await syncRepository.enqueue({ entityType, entityId, action, payload, tenantId });
+    if (this._destroyed) return item;
     
     eventBus.emit(EVENTS.SYNC_QUEUE_UPDATED, { item });
     this._emitStatus();
 
-    if (this.autoSync && this.provider.isConfigured()) {
+    if (!this._destroyed && this.autoSync && this.provider.isConfigured()) {
       this.triggerAutoSync();
     }
     return item;
@@ -296,10 +323,12 @@ export class SyncEngine {
    * @param {number} [delayMs=1200] 
    */
   triggerAutoSync(delayMs = 1200) {
+    if (this._destroyed) return;
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
     }
     this.debounceTimer = setTimeout(() => {
+      if (this._destroyed) return;
       this.processQueue().catch((err) => {
         console.warn('[SyncEngine] Erro durante auto-sync:', err.message);
       });
@@ -483,6 +512,16 @@ export class SyncEngine {
 
     if (!this.provider || !this.provider.isConfigured()) {
       return { processed: 0, success: 0, failed: 0, notConfigured: true };
+    }
+
+    // Aguarda a restauração da sessão: com autenticação ativa e sessão ainda não restaurada
+    // (ex.: inicialização lenta em 4G), NÃO processa nem marca itens como falha de segurança.
+    const authGate = this.authService || authService;
+    if (authGate && typeof authGate.isConfigured === 'function' && authGate.isConfigured()) {
+      const gateSession = typeof authGate.getCurrentSession === 'function' ? authGate.getCurrentSession() : null;
+      if (!gateSession || !gateSession.authenticated) {
+        return { processed: 0, success: 0, failed: 0, awaitingAuth: true };
+      }
     }
 
     this.isSyncing = true;
@@ -1232,15 +1271,6 @@ export class SyncEngine {
   async _emitStatus() {
     const stats = await this.getStats();
     eventBus.emit(EVENTS.SYNC_STATUS_CHANGED, stats);
-  }
-
-  destroy() {
-    this._cleanupFns.forEach(fn => fn && fn());
-    this._cleanupFns = [];
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-    }
-    this._initialized = false;
   }
 }
 

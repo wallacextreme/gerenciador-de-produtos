@@ -528,7 +528,7 @@ export class ProductFormPage {
     }
 
     const overlay = document.createElement('div');
-    overlay.className = 'absolute inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100 transition-all duration-200';
+    overlay.className = 'absolute inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200';
 
     // Botão para tornar Principal
     if (!isPrimary) {

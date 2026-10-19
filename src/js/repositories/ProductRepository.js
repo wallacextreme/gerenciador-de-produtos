@@ -9,31 +9,25 @@ export class ProductRepository extends BaseRepository {
   async findByProductCode(code) {
     if (!code) return null;
     const db = await getDB();
-    const item = await db.getFromIndex(this.storeName, 'productCode', code);
-    if (!item) return null;
     const curTenant = getCurrentTenant();
-    if (curTenant && item.tenantId !== curTenant) return null;
-    return item;
+    const items = await db.getAllFromIndex(this.storeName, 'productCode', code);
+    return items.find(item => !item.deletedAt && (!curTenant || item.tenantId === curTenant)) || null;
   }
 
   async findByInternalCode(code) {
     if (!code) return null;
     const db = await getDB();
-    const item = await db.getFromIndex(this.storeName, 'internalCode', code);
-    if (!item) return null;
     const curTenant = getCurrentTenant();
-    if (curTenant && item.tenantId !== curTenant) return null;
-    return item;
+    const items = await db.getAllFromIndex(this.storeName, 'internalCode', code);
+    return items.find(item => !item.deletedAt && (!curTenant || item.tenantId === curTenant)) || null;
   }
 
   async findByBarcode(barcode) {
     if (!barcode) return null;
     const db = await getDB();
-    const item = await db.getFromIndex(this.storeName, 'barcode', barcode);
-    if (!item) return null;
     const curTenant = getCurrentTenant();
-    if (curTenant && item.tenantId !== curTenant) return null;
-    return item;
+    const items = await db.getAllFromIndex(this.storeName, 'barcode', barcode);
+    return items.find(item => !item.deletedAt && (!curTenant || item.tenantId === curTenant)) || null;
   }
 
   /**

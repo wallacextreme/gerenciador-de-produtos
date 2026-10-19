@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:3000",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "bun run build:staging",
     "frontendDist": "../dist"
   },
   "app": {

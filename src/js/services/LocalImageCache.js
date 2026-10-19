@@ -321,7 +321,8 @@ export class LocalImageCache {
     }
 
     if (!photoId) return false;
-    const { tenantId = null, hard = false } = options || {};
+    const { tenantId = null, hard = false, purge = false } = options || {};
+    const isHard = Boolean(hard || purge);
 
     const existing = await this.get(photoId, { tenantId, touch: false });
     if (!existing) return false;
@@ -329,7 +330,7 @@ export class LocalImageCache {
     // Revoga qualquer Object URL ativo desta foto
     this.revokeUrlForPhoto(photoId);
 
-    if (hard) {
+    if (isHard) {
       await executeTransaction(['productImages', 'imageManifest'], 'readwrite', async (stores) => {
         await stores.productImages.delete(photoId);
         await stores.imageManifest.delete(photoId);
@@ -536,12 +537,14 @@ export class LocalImageCache {
    * Identifica candidatos à remoção (evicção) futura ordenados do mais antigo ao mais recente.
    * NUNCA remove automaticamente fotos protegidas (isPrimary ou HOT).
    *
-   * @param {Object} [options]
-   * @param {string} [options.tenantId]
-   * @param {number} [options.limit=50]
+   * @param {Object|string} [arg1]
+   * @param {Object} [arg2]
    * @returns {Promise<Array<Object>>}
    */
-  async getEvictionCandidates(options = {}) {
+  async getEvictionCandidates(arg1 = {}, arg2 = {}) {
+    const options = typeof arg1 === 'string'
+      ? { ...(arg2 && typeof arg2 === 'object' ? arg2 : {}), tenantId: arg1 }
+      : (arg1 || {});
     const { tenantId = null, limit = 50 } = options;
     const db = await getDB();
     const all = await db.getAll('productImages');
@@ -634,6 +637,19 @@ export class LocalImageCache {
       hotCount,
       warmCount,
       coldCount
+    };
+  }
+
+  /**
+   * Método de instância para estimativa de cota compatível com SettingsPage.
+   * @returns {Promise<{ supported: boolean, usage: number, quota: number, percentUsed: number, available: number, isFallback: boolean }>}
+   */
+  async getQuotaEstimate() {
+    const est = await LocalImageCache.getQuotaEstimate();
+    return {
+      ...est,
+      supported: !est.isFallback,
+      percentUsed: est.quota > 0 ? (est.usage / est.quota) : 0
     };
   }
 

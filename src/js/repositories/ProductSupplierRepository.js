@@ -1,4 +1,4 @@
-import { BaseRepository } from './BaseRepository.js';
+import { BaseRepository, getCurrentTenant } from './BaseRepository.js';
 import { getDB } from '../db/connection.js';
 import { QuotationValidator } from '../validators/QuotationValidator.js';
 
@@ -19,9 +19,11 @@ export class ProductSupplierRepository extends BaseRepository {
    */
   async findByProductId(productId) {
     const db = await getDB();
+    const curTenant = getCurrentTenant();
     const all = await db.getAllFromIndex(this.storeName, 'productId', productId);
-    all.sort((a, b) => new Date(b.quoteDate || b.createdAt) - new Date(a.quoteDate || a.createdAt));
-    return all;
+    const filtered = curTenant ? all.filter(q => q.tenantId === curTenant) : all;
+    filtered.sort((a, b) => new Date(b.quoteDate || b.createdAt) - new Date(a.quoteDate || a.createdAt));
+    return filtered;
   }
 
   /**
@@ -107,9 +109,11 @@ export class ProductSupplierRepository extends BaseRepository {
    */
   async findBySupplierId(supplierId) {
     const db = await getDB();
+    const curTenant = getCurrentTenant();
     const all = await db.getAllFromIndex(this.storeName, 'supplierId', supplierId);
-    all.sort((a, b) => new Date(b.quoteDate || b.createdAt) - new Date(a.quoteDate || a.createdAt));
-    return all;
+    const filtered = curTenant ? all.filter(q => q.tenantId === curTenant) : all;
+    filtered.sort((a, b) => new Date(b.quoteDate || b.createdAt) - new Date(a.quoteDate || a.createdAt));
+    return filtered;
   }
 
   /**

@@ -108,6 +108,11 @@ export class StockMovementRepository extends BaseRepository {
       movements = await db.getAllFromIndex(this.storeName, 'productId', productId);
     }
 
+    const curTenant = getCurrentTenant();
+    if (curTenant) {
+      movements = movements.filter(m => m.tenantId === curTenant);
+    }
+
     let total = 0;
     for (const mov of movements) {
       if (['IN', 'PURCHASE', 'RETURN'].includes(mov.type)) {
@@ -116,7 +121,7 @@ export class StockMovementRepository extends BaseRepository {
         total -= mov.quantity;
       } else if (mov.type === 'ADJUSTMENT') {
         // Delta do ajuste (pode ser positivo ou negativo)
-        total += mov.quantity;
+        total += (mov.delta !== undefined && mov.delta !== null) ? mov.delta : mov.quantity;
       }
     }
     return total;

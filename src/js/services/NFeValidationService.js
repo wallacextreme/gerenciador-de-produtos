@@ -32,12 +32,14 @@ export class NFeValidationService {
     }
 
     // 2. Validação de Destinatário (CNPJ da empresa configurada no ERP)
-    // Busca o CNPJ da empresa nas configurações do sistema
+    // Busca o CNPJ da empresa nas configurações do sistema (companyProfile.cnpj ou legado companyCnpj)
     const settingsRepo = new SettingsRepository();
+    const companyProfile = await settingsRepo.get('companyProfile', null);
     const companyCnpjSetting = await settingsRepo.findById('companyCnpj');
+    const configuredCnpj = companyProfile?.cnpj || companyCnpjSetting?.value || '';
     
-    if (companyCnpjSetting && companyCnpjSetting.value) {
-      const expectedCnpj = companyCnpjSetting.value.replace(/\D/g, '');
+    if (configuredCnpj) {
+      const expectedCnpj = String(configuredCnpj).replace(/\D/g, '');
       const xmlCnpj = (nfe.destinatario?.cnpj || '').replace(/\D/g, '');
       
       if (xmlCnpj && expectedCnpj && xmlCnpj !== expectedCnpj) {

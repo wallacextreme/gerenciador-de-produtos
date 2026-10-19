@@ -30,19 +30,29 @@ export class App {
     const session = authService.getCurrentSession();
 
     this.rootElement.innerHTML = `
+      <!-- Mobile Drawer Backdrop -->
+      <div id="mobile-sidebar-backdrop" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 hidden md:hidden transition-opacity"></div>
+
       <!-- Sidebar -->
-      <aside class="w-full md:w-64 bg-slate-900 text-white flex flex-col flex-shrink-0 transition-all">
+      <aside id="app-sidebar" class="fixed inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col flex-shrink-0 transform -translate-x-full md:relative md:translate-x-0 transition-transform duration-200 ease-in-out">
         <!-- Logo / Brand -->
-        <div class="px-5 py-5 border-b border-slate-700/50 flex items-center gap-3">
-          <div class="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0 shadow-xs">
-            <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+        <div class="px-5 py-5 border-b border-slate-700/50 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0 shadow-xs">
+              <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+              </svg>
+            </div>
+            <div class="min-w-0">
+              <h1 class="text-base font-extrabold text-white tracking-tight leading-none">GestãoPro</h1>
+              <p class="text-[10px] text-slate-400 font-medium mt-0.5 truncate">Catálogo, Estoque, Vendas & Compras</p>
+            </div>
+          </div>
+          <button id="btn-close-mobile-menu" type="button" class="md:hidden p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition" aria-label="Fechar Menu">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
             </svg>
-          </div>
-          <div>
-            <h1 class="text-base font-extrabold text-white tracking-tight leading-none">GestãoPro</h1>
-            <p class="text-[10px] text-slate-400 font-medium mt-0.5">Catálogo, Estoque, Vendas & Compras</p>
-          </div>
+          </button>
         </div>
 
         <!-- Navigation -->
@@ -147,13 +157,18 @@ export class App {
       <!-- Main Content Area -->
       <main class="flex-1 flex flex-col bg-slate-50 overflow-hidden min-w-0">
         <!-- Top Header Bar -->
-        <header class="bg-white border-b border-slate-200 h-14 flex items-center px-6 flex-shrink-0 gap-4">
-          <h2 class="text-sm font-bold text-slate-800" id="page-title">Painel de Controle</h2>
+        <header class="bg-white border-b border-slate-200 h-14 flex items-center px-3 sm:px-6 flex-shrink-0 gap-2 sm:gap-4">
+          <button id="btn-mobile-menu" type="button" class="md:hidden p-2 -ml-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition flex-shrink-0" aria-label="Abrir Menu">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+            </svg>
+          </button>
+          <h2 class="text-sm font-bold text-slate-800 truncate" id="page-title">Painel de Controle</h2>
           <div class="flex-1"></div>
           
-          <div class="flex items-center gap-3 text-xs font-medium">
+          <div class="flex items-center gap-2 sm:gap-3 text-xs font-medium flex-shrink-0">
             <!-- Dynamic Cloud Sync Badge -->
-            <div id="header-sync-badge">
+            <div id="header-sync-badge" class="hidden sm:block">
               <span class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[11px] font-medium">
                 <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
                 Nuvem Pronta
@@ -166,7 +181,7 @@ export class App {
             </div>
 
             <!-- IndexedDB Status -->
-            <span class="flex items-center gap-1.5 text-slate-500">
+            <span class="hidden lg:flex items-center gap-1.5 text-slate-500">
               <span class="w-2 h-2 rounded-full bg-blue-500"></span>
               IndexedDB Local
             </span>
@@ -184,7 +199,7 @@ export class App {
         </div>
 
         <!-- Scrollable Content Region -->
-        <div id="main-content" class="flex-1 overflow-auto p-6">
+        <div id="main-content" class="flex-1 overflow-auto p-3 sm:p-6">
           <!-- Router injects views here -->
         </div>
       </main>
@@ -316,6 +331,29 @@ export class App {
     this.authBadgeEl = this.rootElement.querySelector('#header-auth-badge');
     const installContainer = this.rootElement.querySelector('#sidebar-install-container');
     const btnInstall = this.rootElement.querySelector('#btn-sidebar-install');
+    const sidebar = this.rootElement.querySelector('#app-sidebar');
+    const backdrop = this.rootElement.querySelector('#mobile-sidebar-backdrop');
+    const btnMobileMenu = this.rootElement.querySelector('#btn-mobile-menu');
+    const btnCloseMobileMenu = this.rootElement.querySelector('#btn-close-mobile-menu');
+
+    // 0. Controle do Menu Drawer Mobile
+    const openMobileMenu = () => {
+      if (sidebar) sidebar.classList.remove('-translate-x-full');
+      if (backdrop) backdrop.classList.remove('hidden');
+    };
+    const closeMobileMenu = () => {
+      if (sidebar) sidebar.classList.add('-translate-x-full');
+      if (backdrop) backdrop.classList.add('hidden');
+    };
+
+    if (btnMobileMenu) btnMobileMenu.addEventListener('click', openMobileMenu);
+    if (btnCloseMobileMenu) btnCloseMobileMenu.addEventListener('click', closeMobileMenu);
+    if (backdrop) backdrop.addEventListener('click', closeMobileMenu);
+    if (sidebar) {
+      sidebar.querySelectorAll('.nav-link').forEach((link) => {
+        link.addEventListener('click', closeMobileMenu);
+      });
+    }
 
     // 1. Atualização do Badge de Rede
     const updateNetworkUI = (isOnline) => {
