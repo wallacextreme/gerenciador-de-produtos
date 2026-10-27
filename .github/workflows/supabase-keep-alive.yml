@@ -1,51 +1,171 @@
-name: Supabase Keep-Alive (Staging Storage)
+# ==============================================================================
+# GestãoPro — Supabase Keep-Alive DEFINITIVO (PHASE 16 / Anti-Pause)
+# ------------------------------------------------------------------------------
+# L1  Ping 3x ao dia com GRAVAÇÃO REAL no PostgreSQL (RPC rpc_keep_alive) + Storage
+# L4  Watchdog: se o projeto estiver pausado, restaura via Management API
+#     (requer o secret opcional SUPABASE_ACCESS_TOKEN)
+#     Auto-cura: se a RPC não existir no banco, aplica a migração sozinho
+# L5  Anti-expiração de 60 dias do GitHub (repositório público):
+#     re-habilita o workflow via API + commit em branch isolado a cada 10 dias
+# L6  Alarme externo opcional (secret HEALTHCHECK_URL — healthchecks.io)
+#
+# Horários com minuto quebrado (:17) para fugir do congestionamento de hora cheia
+# do GitHub (observado atraso de até 5h em crons às 09:00 UTC).
+# ==============================================================================
+name: Supabase Keep-Alive (Anti-Pause Definitivo)
 
 on:
   schedule:
-    # Executa automaticamente a cada 3 dias às 09:00 UTC (06:00 BRT)
-    # Mantém o projeto ativo bem abaixo do limite de 7 dias de inatividade do Free Tier
-    - cron: '0 9 */3 * *'
-  workflow_dispatch: # Permite disparo manual imediato pela aba Actions do GitHub
+    - cron: '17 11 * * *' # 08:17 BRT — manhã
+    - cron: '17 17 * * *' # 14:17 BRT — tarde
+    - cron: '17 23 * * *' # 20:17 BRT — noite
+  workflow_dispatch:
+    inputs:
+      apply_migration:
+        description: 'Aplicar a migração de heartbeat no banco (requer SUPABASE_ACCESS_TOKEN)'
+        type: boolean
+        default: false
+      force_heartbeat_commit:
+        description: 'Forçar commit no branch keepalive-heartbeat'
+        type: boolean
+        default: false
+  repository_dispatch:
+    types: [keep-alive]
 
 permissions:
   contents: read
 
+concurrency:
+  group: supabase-keep-alive
+  cancel-in-progress: false
+
 jobs:
   keep-alive:
-    name: Ping Supabase Storage & PostgREST
+    name: Ping real (Postgres + Storage) com auto-cura
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 25
     env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://fujgtzxzspqhvvbzmqzv.supabase.co' }}
-      SUPABASE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || secrets.SUPABASE_ANON_KEY || 'sb_publishable_2PiIY1v6HWea8sqwCg2KVQ_aAKflAZh' }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+      PING_SOURCE: github-actions
     steps:
-      - name: Ping Supabase Storage API (storage.buckets)
+      - name: Checkout (somente scripts e migrações)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            scripts
+            supabase
+
+      - name: Versão do Node
+        run: node --version
+
+      - name: Watchdog — garantir projeto ativo (restore automático se pausado)
+        id: watchdog
+        continue-on-error: true
+        run: node scripts/supabase-watchdog.mjs ensure-active
+
+      - name: Aplicar migração (manual)
+        if: github.event_name == 'workflow_dispatch' && inputs.apply_migration
+        run: node scripts/supabase-watchdog.mjs apply-migration supabase/migrations/20261027000000_keep_alive_heartbeat.sql
+
+      - name: Keep-Alive com auto-cura
+        id: ping
         run: |
-          echo "Disparando Keep-Alive contra Supabase Storage API (${SUPABASE_URL})..."
-          HTTP_STATUS=$(curl -s -o /tmp/storage_resp.json -w "%{http_code}" \
-            -X GET "${SUPABASE_URL}/storage/v1/bucket" \
-            -H "apikey: ${SUPABASE_KEY}" \
-            -H "Accept: application/json")
-          echo "Storage API HTTP Status: ${HTTP_STATUS}"
-          cat /tmp/storage_resp.json
-          echo ""
-          if [ "${HTTP_STATUS}" -lt 200 ] || [ "${HTTP_STATUS}" -ge 300 ]; then
-            echo "::error::Falha no Keep-Alive do Supabase Storage (HTTP ${HTTP_STATUS})"
-            exit 1
+          set +e
+          node scripts/supabase-keep-alive.mjs
+          code=$?
+
+          # 2 = RPC ausente no banco -> aplica a migração automaticamente e tenta de novo
+          if [ "$code" -eq 2 ] && [ -n "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "::warning::RPC ausente. Aplicando migração automaticamente..."
+            node scripts/supabase-watchdog.mjs apply-migration supabase/migrations/20261027000000_keep_alive_heartbeat.sql
+            sleep 10
+            node scripts/supabase-keep-alive.mjs
+            code=$?
           fi
 
-      - name: Ping Supabase PostgREST API (RPC keep_alive)
+          # 3 = projeto pausado -> restaura e tenta de novo
+          if [ "$code" -eq 3 ] && [ -n "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "::warning::Projeto pausado. Executando restore automático..."
+            node scripts/supabase-watchdog.mjs ensure-active
+            node scripts/supabase-keep-alive.mjs
+            code=$?
+            if [ "$code" -eq 2 ]; then
+              node scripts/supabase-watchdog.mjs apply-migration supabase/migrations/20261027000000_keep_alive_heartbeat.sql
+              sleep 10
+              node scripts/supabase-keep-alive.mjs
+              code=$?
+            fi
+          fi
+
+          case "$code" in
+            0) echo "::notice::Keep-Alive OK — gravação real confirmada no banco." ;;
+            2) echo "::error::RPC rpc_keep_alive ausente. Configure SUPABASE_ACCESS_TOKEN ou rode o SQL manualmente." ;;
+            3) echo "::error::Projeto Supabase PAUSADO. Configure SUPABASE_ACCESS_TOKEN para restore automático ou restaure no painel." ;;
+            *) echo "::error::Keep-Alive falhou (código $code)." ;;
+          esac
+          exit "$code"
+
+      - name: Alarme externo — sucesso (healthchecks.io)
+        if: success() && env.HEALTHCHECK_URL != ''
+        run: curl -fsS -m 15 --retry 5 --retry-all-errors -o /dev/null "$HEALTHCHECK_URL"
+
+      - name: Alarme externo — falha (healthchecks.io)
+        if: failure() && env.HEALTHCHECK_URL != ''
+        run: curl -fsS -m 15 --retry 5 --retry-all-errors -o /dev/null "$HEALTHCHECK_URL/fail"
+
+  anti-expiry:
+    name: Anti-expiração de 60 dias do GitHub
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force_heartbeat_commit }}
+    steps:
+      - name: Re-habilitar este workflow via API (idempotente)
         run: |
-          echo "Acionando PostgREST / PostgreSQL schema cache..."
-          HTTP_STATUS=$(curl -s -o /tmp/rest_resp.json -w "%{http_code}" \
-            -X POST "${SUPABASE_URL}/rest/v1/rpc/keep_alive" \
-            -H "apikey: ${SUPABASE_KEY}" \
-            -H "Content-Type: application/json" \
-            -d '{}')
-          echo "PostgREST HTTP Status: ${HTTP_STATUS}"
-          cat /tmp/rest_resp.json
-          echo ""
-          # 200 (função RPC instalada) ou 404 PGRST202 (PostgREST consultou o banco com sucesso)
-          if [ "${HTTP_STATUS}" != "200" ] && [ "${HTTP_STATUS}" != "404" ]; then
-            echo "::warning::Status inesperado no PostgREST: ${HTTP_STATUS}"
+          gh api -X PUT "repos/${REPO}/actions/workflows/supabase-keep-alive.yml/enable" \
+            && echo "Workflow confirmado como habilitado." \
+            || echo "::warning::Não foi possível re-habilitar via API."
+
+      - name: Heartbeat no branch isolado keepalive-heartbeat (a cada 10 dias)
+        run: |
+          set -e
+          mkdir hb && cd hb
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+
+          if git fetch -q --depth 1 origin keepalive-heartbeat 2>/dev/null; then
+            git checkout -q -b keepalive-heartbeat FETCH_HEAD
+            last=$(git log -1 --format=%ct)
+            age=$(( ( $(date +%s) - last ) / 86400 ))
+          else
+            git checkout -q --orphan keepalive-heartbeat
+            age=999
+          fi
+          echo "Dias desde o último heartbeat: ${age}"
+
+          if [ "$age" -ge 10 ] || [ "$FORCE" = "true" ]; then
+            date -u +"%Y-%m-%dT%H:%M:%SZ" > last-keep-alive.txt
+            printf '%s\n' \
+              "# keepalive-heartbeat" \
+              "" \
+              "Branch automático mantido pelo workflow Supabase Keep-Alive." \
+              "Impede que o GitHub desative os agendamentos após 60 dias sem atividade." \
+              "Não é usado pelo app e não precisa ser mesclado." > README.md
+            git add -A
+            git commit -q -m "chore(keepalive): heartbeat $(date -u +%F)"
+            git push -q origin keepalive-heartbeat
+            echo "::notice::Heartbeat registrado no branch keepalive-heartbeat."
+          else
+            echo "Heartbeat recente; nenhum commit necessário."
           fi

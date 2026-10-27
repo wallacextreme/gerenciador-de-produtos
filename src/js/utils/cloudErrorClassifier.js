@@ -73,17 +73,27 @@ export function classifyCloudError(error) {
     };
   }
 
-  // 3. Erros Transitórios / Rede / Timeout / Rate Limit (Temporary)
+  // 3. Erros Transitórios / Rede / Timeout / Rate Limit / Serviço Indisponível (Temporary)
   if (
     code === '429' ||
     code === '500' ||
     code === '502' ||
     code === '503' ||
     code === '504' ||
+    code === '520' ||
+    code === '521' ||
+    code === '522' ||
+    code === '523' ||
+    code === '524' ||
+    code === '540' ||
     code === 'unavailable' ||
     code === 'deadline-exceeded' ||
     code === 'timeout' ||
     code === 'network-request-failed' ||
+    code === 'enotfound' ||
+    code === 'eai_again' ||
+    code === 'econnreset' ||
+    code === 'econnrefused' ||
     lowerMsg.includes('timeout') ||
     lowerMsg.includes('network') ||
     lowerMsg.includes('econnreset') ||
@@ -93,12 +103,22 @@ export function classifyCloudError(error) {
     lowerMsg.includes('too many requests') ||
     lowerMsg.includes('conexão') ||
     lowerMsg.includes('conexao') ||
-    lowerMsg.includes('connection')
+    lowerMsg.includes('connection') ||
+    lowerMsg.includes('failed to fetch') ||
+    lowerMsg.includes('fetch failed') ||
+    lowerMsg.includes('enotfound') ||
+    lowerMsg.includes('eai_again') ||
+    lowerMsg.includes('could not resolve host') ||
+    lowerMsg.includes('dns não existe') ||
+    lowerMsg.includes('project paused') ||
+    lowerMsg.includes('pausado') ||
+    lowerMsg.includes('serviço temporariamente indisponível') ||
+    lowerMsg.includes('service unavailable')
   ) {
     return {
       category: ERROR_CATEGORY.TEMPORARY,
       shouldRetry: true,
-      userMessage: 'Instabilidade temporária de rede. O sistema tentará novamente em instantes.',
+      userMessage: 'Servidor ou conexão temporariamente indisponível. O sistema tentará novamente de forma automática.',
       code: code || 'TEMPORARY_NETWORK'
     };
   }

@@ -477,17 +477,47 @@ export class SupabaseStorageProvider extends ImageStorageProvider {
       const fetchFn = (this.config && typeof this.config.fetchImpl === 'function')
         ? this.config.fetchImpl
         : fetch;
-      const res = await fetchFn(`${supabaseUrl}/storage/v1/bucket`, {
-        method: 'GET',
-        headers: {
-          apikey: supabaseKey,
-          Authorization: `Bearer ${supabaseKey}`
+
+      const isJwt = typeof supabaseKey === 'string' && supabaseKey.split('.').length === 3;
+      const authHeader = isJwt ? { Authorization: `Bearer ${supabaseKey}` } : {};
+
+      let res = null;
+
+      // Se endpoint explícito foi requisitado (ex: testes legados), honra diretamente
+      if (options.endpoint) {
+        res = await fetchFn(`${supabaseUrl}${options.endpoint}`, {
+          method: options.method || 'GET',
+          headers: { apikey: supabaseKey, ...authHeader }
+        });
+      } else {
+        // 1. Tenta RPC real rpc_keep_alive para gerar escrita/atividade no PostgreSQL
+        try {
+          res = await fetchFn(`${supabaseUrl}/rest/v1/rpc/rpc_keep_alive`, {
+            method: 'POST',
+            headers: {
+              apikey: supabaseKey,
+              'Content-Type': 'application/json',
+              ...authHeader
+            },
+            body: JSON.stringify({ ping_source: 'app' })
+          });
+        } catch (_) {
+          res = null;
         }
-      });
-      if (res.ok && typeof localStorage !== 'undefined') {
+
+        // 2. Se a RPC não respondeu OK (ex: 404/migração pendente), fallback para Storage
+        if (!res || !res.ok) {
+          res = await fetchFn(`${supabaseUrl}/storage/v1/bucket`, {
+            method: 'GET',
+            headers: { apikey: supabaseKey, ...authHeader }
+          });
+        }
+      }
+
+      if (res && res.ok && typeof localStorage !== 'undefined') {
         try { localStorage.setItem(STORAGE_KEY, String(Date.now())); } catch (_) {}
       }
-      return { ok: res.ok, status: res.status };
+      return { ok: !!(res && res.ok), status: res?.status };
     } catch (_) {
       return { ok: false };
     }

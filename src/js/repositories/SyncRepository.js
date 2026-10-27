@@ -851,7 +851,18 @@ export class SyncRepository extends BaseRepository {
       'firestore.googleapis.com',
       'erro ao salvar documento no firestore',
       'erro ao deletar documento no firestore',
-      'firebase não configurado com project id e api key'
+      'firebase não configurado com project id e api key',
+      'falha no upload para o supabase storage',
+      'could not resolve host',
+      'dns não existe',
+      'enotfound',
+      'failed to fetch',
+      'fetch failed',
+      'project paused',
+      'pausado',
+      '540',
+      '503',
+      'temporary_network'
     ];
     const failed = await this.getFailed();
     const curTenant = getCurrentTenant();
@@ -862,7 +873,8 @@ export class SyncRepository extends BaseRepository {
 
     for (const item of failed) {
       const msg = String(item.lastError || '').toLowerCase();
-      if (!PROVIDER_MISCONFIG_PATTERNS.some((p) => msg.includes(p))) continue;
+      const cat = String(item.errorCategory || '').toLowerCase();
+      if (!PROVIDER_MISCONFIG_PATTERNS.some((p) => msg.includes(p)) && cat !== 'temporary') continue;
       if (!item.tenantId || (curTenant && item.tenantId !== curTenant)) continue;
       if (!item.entityType || !item.action || !item.entityId) continue;
       if (currentSession && !checkPermission(currentSession, item.action, item.entityType).authorized) continue;

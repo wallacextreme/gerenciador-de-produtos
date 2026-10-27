@@ -1,6 +1,6 @@
 {
   "name": "gerenciador-de-produtos",
-  "version": "1.13.0",
+  "version": "1.13.1",
   "type": "module",
   "private": true,
   "scripts": {
@@ -13,7 +13,9 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "test:storage-emulator": "bun scripts/test-storage-emulator.js"
+    "test:storage-emulator": "bun scripts/test-storage-emulator.js",
+    "keep-alive": "node scripts/supabase-keep-alive.mjs",
+    "watchdog": "node scripts/supabase-watchdog.mjs"
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "^6.0.0",

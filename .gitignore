@@ -50,6 +50,7 @@ dump/
 *.tsbuildinfo
 .temp/
 .tmp/
+scratch/
 
 # Tauri build artifacts
 src-tauri/target/

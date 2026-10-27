@@ -1,5 +1,31 @@
 # Changelog — GestãoPro
 
+## [1.13.1] — 2026-10-27
+
+### Executado — PHASE 16 — SISTEMA KEEP-ALIVE ANTI-PAUSA DEFINITIVO (7 CAMADAS)
+- **Diagnóstico com Evidências de Telemetria**:
+  - Constatação: O projeto Supabase `fujgtzxzspqhvvbzmqzv` pausou entre 22/10 e 25/10/2026 porque requisições de Storage (`GET /storage/v1/bucket`) ou respostas 404 de schema PostgREST não geram transações reais nem gravam no WAL do PostgreSQL.
+- **Camada de Gravação Real no Banco (`supabase/migrations/20261027000000_keep_alive_heartbeat.sql`)**:
+  - Criação da tabela `public._keep_alive_heartbeat` com RLS ativo e bloqueio total contra escrita/leitura direta por `anon` e `authenticated`.
+  - Função RPC `public.rpc_keep_alive(ping_source)` com `SECURITY DEFINER` executando `UPSERT` real (incremento atômico de `ping_count` e `now()`), gerando transação real no banco.
+  - Função legada `public.keep_alive()` mantida para retrocompatibilidade.
+- **Automação GitHub Actions 3x ao Dia (`.github/workflows/supabase-keep-alive.yml`)**:
+  - Agendamento cron nos horários 08:17, 14:17 e 20:17 BRT (minutos quebrados `:17` para evitar atraso de fila do GitHub).
+  - Execução de `scripts/supabase-keep-alive.mjs` com checagem de escrita real via RPC e listagem de fotos.
+  - Job anti-expiração de 60 dias: re-habilita o workflow via API do GitHub e registra heartbeat a cada 10 dias em branch órfão (`keepalive-heartbeat`), sem poluir a `main`.
+- **Watchdog com Auto-Restore via Management API (`scripts/supabase-watchdog.mjs`)**:
+  - Monitoramento de status do projeto: se `INACTIVE` ou `PAUSED`, aciona `POST /v1/projects/{ref}/restore` e aguarda retorno para `ACTIVE_HEALTHY`.
+  - Auto-cura: se a RPC não existir no banco, aplica automaticamente a migração via `POST /database/query`.
+- **Resiliência a Quedas e Supabase Indisponível no App**:
+  - `src/js/utils/cloudErrorClassifier.js`: reclassifica `fetch failed`, `Failed to fetch`, `ENOTFOUND`, `540`, `503` como `TEMPORARY` com `shouldRetry: true`.
+  - `src/js/services/ImageSyncService.js`: falha de rede/Supabase pausado mantém fotos em `QUEUED` sem consumir tentativas nem gerar falhas permanentes.
+  - `src/js/repositories/SyncRepository.js`: `recoverProviderMisconfigurationFailures()` auto-recupera itens da outbox pendentes que falharam por indisponibilidade de rede ou pausa.
+  - `src/js/sync/SupabaseStorageProvider.js`: `pingKeepAlive` atualizado para acionar a RPC `rpc_keep_alive` e nunca enviar `sb_publishable_...` como Bearer.
+- **Validação de Linha de Base**:
+  - Suíte completa de **1128 testes automatizados aprovada com 100% de sucesso (0 falhas em 44 arquivos)**.
+  - 25 novos testes unitários adicionados em `tests/supabase_keep_alive_phase16.test.js`.
+  - Guia completo passo a passo documentado em [KEEP_ALIVE_SETUP.md](KEEP_ALIVE_SETUP.md).
+
 ## [1.13.0-phase13-cloud-homologation] — 2026-10-09
 
 ### Executado — PHASE 13 — REAL FIREBASE CLOUD HOMOLOGATION (Prompt Master)
