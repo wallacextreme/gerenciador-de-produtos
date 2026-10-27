@@ -9,7 +9,7 @@
  *   - O Service Worker NUNCA armazena dados sensíveis ou intercepta APIs em nuvem.
  */
 
-const CACHE_VERSION = 'gestaopro-v1.13.0-pwa10';
+const CACHE_VERSION = 'gestaopro-v1.13.1-pwa10';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 

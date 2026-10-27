@@ -60,7 +60,7 @@ describe('Tauri Desktop, Adapters & Multi-Plataforma (FASE 12)', () => {
       const conf = JSON.parse(raw);
 
       expect(conf.productName).toBe('GestãoPro');
-      expect(conf.version).toBe('1.13.0');
+      expect(conf.version).toBe('1.13.1');
       expect(conf.identifier).toBe('com.gestaopro.app');
       expect(conf.build.frontendDist).toBe('../dist');
       expect(conf.build.devUrl).toBe('http://localhost:3000');
@@ -72,7 +72,7 @@ describe('Tauri Desktop, Adapters & Multi-Plataforma (FASE 12)', () => {
       const content = readFileSync(cargoTomlPath, 'utf-8');
 
       expect(content).toContain('name = "gestaopro"');
-      expect(content).toContain('version = "1.13.0"');
+      expect(content).toContain('version = "1.13.1"');
       expect(content).toContain('tauri = { version = "2"');
       expect(content).toContain('tauri-build = { version = "2"');
     });
@@ -106,11 +106,11 @@ describe('Tauri Desktop, Adapters & Multi-Plataforma (FASE 12)', () => {
     const packageJsonPath = resolve(process.cwd(), 'package.json');
     const viteConfigPath = resolve(process.cwd(), 'vite.config.js');
 
-    it('package.json deve conter scripts tauri, tauri:dev e tauri:build na versão 1.13.0', () => {
+    it('package.json deve conter scripts tauri, tauri:dev e tauri:build na versão 1.13.1', () => {
       const raw = readFileSync(packageJsonPath, 'utf-8');
       const pkg = JSON.parse(raw);
 
-      expect(pkg.version).toBe('1.13.0');
+      expect(pkg.version).toBe('1.13.1');
       expect(pkg.scripts.tauri).toBe('tauri');
       expect(pkg.scripts['tauri:dev']).toBe('tauri dev');
       expect(pkg.scripts['tauri:build']).toBe('tauri build');

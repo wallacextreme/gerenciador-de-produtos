@@ -148,7 +148,7 @@ export class App {
         <!-- Footer -->
         <div class="p-4 border-t border-slate-700/50">
           <div class="text-[10px] text-slate-500 text-center">
-            <p class="font-semibold text-slate-400">GestãoPro v1.13.0</p>
+            <p class="font-semibold text-slate-400">GestãoPro v1.13.1</p>
             <p class="text-[9px] text-slate-500 mt-0.5">Firebase & Cloud Sync</p>
           </div>
         </div>
